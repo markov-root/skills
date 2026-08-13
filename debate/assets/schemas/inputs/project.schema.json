@@ -1,0 +1,330 @@
+{
+  "$defs": {
+    "PassInput": {
+      "additionalProperties": false,
+      "properties": {
+        "dynamic": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dynamic"
+        },
+        "pass": {
+          "enum": [
+            "floor",
+            "adversarial",
+            "escalation"
+          ],
+          "title": "Pass",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pass"
+      ],
+      "title": "PassInput",
+      "type": "object"
+    },
+    "RefereePolicyInput": {
+      "additionalProperties": false,
+      "properties": {
+        "before_respond": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 63,
+                "minLength": 1,
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62})$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Respond"
+        },
+        "before_revise": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 63,
+                "minLength": 1,
+                "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62})$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before Revise"
+        }
+      },
+      "title": "RefereePolicyInput",
+      "type": "object"
+    },
+    "RoundsInput": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "default": 5,
+          "maximum": 10000,
+          "minimum": 3,
+          "title": "Max",
+          "type": "integer"
+        },
+        "min": {
+          "default": 3,
+          "maximum": 10000,
+          "minimum": 3,
+          "title": "Min",
+          "type": "integer"
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "propose",
+                      "critique",
+                      "revise",
+                      "redteam",
+                      "respond"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PassInput"
+                  }
+                ]
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan"
+        },
+        "referees": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefereePolicyInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        }
+      },
+      "title": "RoundsInput",
+      "type": "object"
+    }
+  },
+  "$id": "https://cesia.org/schemas/debate.project/1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          {
+            "not": {
+              "required": [
+                "protocol"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "protocol": {
+                "const": "delphi"
+              }
+            },
+            "required": [
+              "protocol"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "aggregator": {
+            "enum": [
+              "arbitrator_select",
+              null
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "protocol": {
+            "const": "idea"
+          }
+        },
+        "required": [
+          "protocol"
+        ]
+      },
+      "then": {
+        "properties": {
+          "aggregator": {
+            "enum": [
+              "statistical",
+              null
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "aggregator": {
+      "anyOf": [
+        {
+          "enum": [
+            "arbitrator_select",
+            "statistical",
+            "vote"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Aggregator"
+    },
+    "context": {
+      "default": "",
+      "maxLength": 2000000,
+      "title": "Context",
+      "type": "string"
+    },
+    "criteria": {
+      "default": "",
+      "maxLength": 500000,
+      "title": "Criteria",
+      "type": "string"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62})$",
+      "title": "Id",
+      "type": "string"
+    },
+    "item": {
+      "default": "items/v0.1.0.md",
+      "maxLength": 4096,
+      "minLength": 1,
+      "pattern": "^[^\\\\\\x00]*\\S[^\\\\\\x00]*$",
+      "title": "Item",
+      "type": "string"
+    },
+    "materials": {
+      "default": "materials",
+      "maxLength": 4096,
+      "minLength": 1,
+      "pattern": "^[^\\\\\\x00]*\\S[^\\\\\\x00]*$",
+      "title": "Materials",
+      "type": "string"
+    },
+    "materials_mode": {
+      "default": "context",
+      "enum": [
+        "context",
+        "disk",
+        "search"
+      ],
+      "title": "Materials Mode",
+      "type": "string"
+    },
+    "protocol": {
+      "default": "delphi",
+      "enum": [
+        "delphi",
+        "idea"
+      ],
+      "title": "Protocol",
+      "type": "string"
+    },
+    "question": {
+      "maxLength": 500000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Question",
+      "type": "string"
+    },
+    "rounds": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RoundsInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema_id": {
+      "const": "debate.project",
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "id",
+    "question"
+  ],
+  "title": "ProjectInput",
+  "type": "object",
+  "x-schema-id": "debate.project",
+  "x-schema-version": "1.0.0"
+}

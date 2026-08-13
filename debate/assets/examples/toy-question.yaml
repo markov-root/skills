@@ -1,0 +1,13 @@
+# A tiny, neutral run-spec used only for offline cost/preflight validation.
+schema_id: debate.run-spec
+schema_version: 1.0.0
+id: toy-beverage
+protocol: delphi
+question: |
+  What is the single best hot beverage for sustained focus during a two-hour deep-work block?
+context: |
+  Consider only widely available beverages. Ground claims in commonly known effects such as
+  caffeine duration, jitter, and hydration.
+criteria: |
+  Each option must name a specific beverage and be independently defensible. Options must be
+  mutually distinct.

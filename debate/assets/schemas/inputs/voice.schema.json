@@ -1,0 +1,241 @@
+{
+  "$defs": {
+    "AffordancePolicyInput": {
+      "additionalProperties": false,
+      "description": "Declared tool access.\n\nNon-default values are rejected by ``VoiceInput`` until task 0059 supplies the runtime.  The\nmodel exists now so capability negotiation has one stable vocabulary and unsupported claims\ncannot masquerade as active behavior.",
+      "properties": {
+        "filesystem": {
+          "default": "none",
+          "enum": [
+            "none",
+            "project_read"
+          ],
+          "title": "Filesystem",
+          "type": "string"
+        },
+        "web_search": {
+          "default": false,
+          "title": "Web Search",
+          "type": "boolean"
+        }
+      },
+      "title": "AffordancePolicyInput",
+      "type": "object"
+    },
+    "CallPolicyInput": {
+      "additionalProperties": false,
+      "description": "Per-voice call knobs that the current backends actually enforce.",
+      "properties": {
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "maximum": 2.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "timeout_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "maximum": 86400.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout S"
+        }
+      },
+      "title": "CallPolicyInput",
+      "type": "object"
+    }
+  },
+  "$id": "https://cesia.org/schemas/debate.voice/1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "backend": {
+            "const": "openrouter"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "call_policy": {
+            "properties": {
+              "reasoning_effort": {
+                "type": "null"
+              },
+              "timeout_s": {
+                "type": "null"
+              }
+            }
+          },
+          "model": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "backend": {
+            "const": "claude_code"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "call_policy": {
+            "properties": {
+              "reasoning_effort": {
+                "type": "null"
+              },
+              "temperature": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "backend": {
+            "const": "codex_cli"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "call_policy": {
+            "properties": {
+              "temperature": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "affordances": {
+          "properties": {
+            "filesystem": {
+              "const": "none"
+            },
+            "web_search": {
+              "const": false
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "affordances": {
+      "$ref": "#/$defs/AffordancePolicyInput"
+    },
+    "backend": {
+      "enum": [
+        "openrouter",
+        "claude_code",
+        "codex_cli"
+      ],
+      "title": "Backend",
+      "type": "string"
+    },
+    "call_policy": {
+      "$ref": "#/$defs/CallPolicyInput"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "id": {
+      "maxLength": 63,
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62})$",
+      "title": "Id",
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
+    "persona": {
+      "anyOf": [
+        {
+          "maxLength": 100000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Persona"
+    }
+  },
+  "required": [
+    "id",
+    "backend"
+  ],
+  "title": "VoiceInput",
+  "type": "object",
+  "x-schema-id": "debate.voice",
+  "x-schema-version": "1.0.0"
+}

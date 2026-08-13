@@ -1,0 +1,4 @@
+interface:
+  display_name: "Debate"
+  short_description: "Run recorded cross-vendor model debates"
+  default_prompt: "Use $debate to pressure-test this claim with a recorded cross-vendor panel."

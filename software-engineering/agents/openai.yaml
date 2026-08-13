@@ -1,0 +1,4 @@
+interface:
+  display_name: "Software Engineering"
+  short_description: "Apply disciplined, verifiable engineering workflows"
+  default_prompt: "Use $software-engineering to plan and verify this non-trivial engineering or contract change."

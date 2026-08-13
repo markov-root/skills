@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/markov-root/skills/schemas/engineering/document-graph/v1.json",
+  "title": "Engineering document graph v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "nodes", "edges", "findings", "partial", "limits"],
+  "properties": {
+    "version": { "const": 1 },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "partial": { "type": "boolean" },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_nodes", "max_edges", "max_trace_depth"],
+      "properties": {
+        "max_nodes": { "type": "integer", "minimum": 1 },
+        "max_edges": { "type": "integer", "minimum": 1 },
+        "max_trace_depth": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "required": ["path", "line"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "declared": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "title",
+        "summary",
+        "provenance",
+        "selection",
+        "partial"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:.+$" },
+        "kind": { "type": "string", "minLength": 1 },
+        "state": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "summary": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 150 },
+            { "type": "null" }
+          ]
+        },
+        "provenance": {
+          "oneOf": [{ "$ref": "#/$defs/provenance" }, { "type": "null" }]
+        },
+        "selection": {
+          "oneOf": [{ "type": "object" }, { "type": "null" }]
+        },
+        "partial": { "type": "boolean" }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "type", "target", "provenance", "partial"],
+      "properties": {
+        "source": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:.+$" },
+        "type": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*:.+$" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "partial": { "type": "boolean" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "severity",
+        "message",
+        "rationale",
+        "repair",
+        "ci_blocking",
+        "provenance"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["warning", "error"] },
+        "message": { "type": "string", "minLength": 1 },
+        "rationale": { "type": "string", "minLength": 1 },
+        "repair": { "type": "string", "minLength": 1 },
+        "ci_blocking": { "type": "boolean" },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    }
+  }
+}

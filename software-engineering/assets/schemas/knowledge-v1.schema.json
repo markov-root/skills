@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/software-engineering/knowledge-v1.schema.json",
+  "title": "Software engineering knowledge routing metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "summary", "routes"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$" },
+    "summary": { "type": "string", "minLength": 20, "maxLength": 220, "pattern": "^[^\\n]+[.!?]$" },
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "new-project",
+          "inherited-repository",
+          "requirements-acceptance-scope",
+          "test-strategy-evidence",
+          "module-system-design",
+          "api-event-contract",
+          "database-schema-migration",
+          "refactor-rewrite",
+          "defect-diagnosis",
+          "dependency-build-change",
+          "deployment-operations",
+          "performance-work",
+          "review-audit",
+          "documentation-repository-organization",
+          "user-facing-interaction",
+          "resource-cost-change",
+          "technology-framework-choice",
+          "agent-facing-skill-tool"
+        ]
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^src-[a-z][a-z0-9-]{1,79}$" }
+    }
+  }
+}

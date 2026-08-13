@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/markov-root/skills/schemas/engineering/document-metadata/v2.json",
+  "title": "Engineering document metadata v2 queryable core",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "uid",
+    "title",
+    "role",
+    "status",
+    "summary",
+    "created",
+    "updated"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "uid": { "$ref": "#/$defs/nonempty" },
+    "title": { "$ref": "#/$defs/nonempty" },
+    "role": {
+      "enum": [
+        "task",
+        "adr",
+        "audit",
+        "research",
+        "lesson",
+        "handoff",
+        "specification",
+        "knowledge",
+        "reference",
+        "standard",
+        "guide",
+        "roadmap",
+        "changelog",
+        "runbook",
+        "index",
+        "template"
+      ]
+    },
+    "status": { "$ref": "#/$defs/nonempty" },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 150
+    },
+    "created": { "type": "string", "format": "date" },
+    "updated": { "type": "string", "format": "date" },
+    "owner": { "$ref": "#/$defs/nonempty" },
+    "supersedes": { "type": "string" },
+    "superseded_by": { "type": "string" },
+    "engineering_document": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "role": { "$ref": "#/$defs/record_role" } } },
+      "then": { "required": ["engineering_document"] },
+      "else": { "not": { "required": ["engineering_document"] } }
+    },
+    {
+      "if": { "required": ["role"] },
+      "then": {
+        "properties": {
+          "uid": {
+            "type": "string",
+            "pattern": "^(adr|task|lesson|audit|research|handoff|specification|knowledge|reference|standard|guide|roadmap|changelog|runbook|index|template)-"
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "nonempty": { "type": "string", "minLength": 1 },
+    "record_role": {
+      "enum": ["task", "adr", "audit", "research", "lesson", "handoff"]
+    }
+  }
+}

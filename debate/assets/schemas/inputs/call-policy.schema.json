@@ -1,0 +1,60 @@
+{
+  "$id": "https://cesia.org/schemas/debate.call-policy/1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Per-voice call knobs that the current backends actually enforce.",
+  "properties": {
+    "reasoning_effort": {
+      "anyOf": [
+        {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoning Effort"
+    },
+    "temperature": {
+      "anyOf": [
+        {
+          "maximum": 2.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Temperature"
+    },
+    "timeout_s": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "maximum": 86400.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout S"
+    }
+  },
+  "title": "CallPolicyInput",
+  "type": "object",
+  "x-schema-id": "debate.call-policy",
+  "x-schema-version": "1.0.0"
+}

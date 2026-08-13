@@ -1,0 +1,332 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/markov-root/skills/schemas/engineering/document-metadata/v1.json",
+  "title": "Engineering document metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "role",
+    "id",
+    "uid",
+    "title",
+    "state",
+    "authority",
+    "created",
+    "updated",
+    "transition_history",
+    "transitions",
+    "relationships",
+    "details"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "role": {
+      "enum": ["task", "adr", "audit", "research", "lesson", "handoff"]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "uid": { "$ref": "#/$defs/uid" },
+    "title": { "$ref": "#/$defs/nonempty" },
+    "state": { "$ref": "#/$defs/nonempty" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "created": { "type": "string", "format": "date" },
+    "updated": { "type": "string", "format": "date" },
+    "transition_history": {
+      "enum": ["unverified", "complete", "legacy-unknown"]
+    },
+    "transitions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/transition" }
+    },
+    "relationships": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relationship" },
+      "uniqueItems": true
+    },
+    "freshness": { "$ref": "#/$defs/freshness" },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^x-[a-z0-9][a-z0-9-]{0,62}$"
+      },
+      "additionalProperties": true
+    },
+    "details": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "role": { "const": "task" } } },
+      "then": {
+        "properties": {
+          "uid": { "pattern": "^task-" },
+          "state": {
+            "enum": ["todo", "partial", "blocked", "done", "superseded"]
+          },
+          "authority": {
+            "properties": { "kind": { "const": "work-state" } }
+          },
+          "details": { "$ref": "#/$defs/task_details" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "role": { "const": "adr" } } },
+      "then": {
+        "properties": {
+          "uid": { "pattern": "^adr-" },
+          "state": {
+            "enum": [
+              "proposed",
+              "accepted",
+              "rejected",
+              "deprecated",
+              "superseded"
+            ]
+          },
+          "authority": {
+            "properties": { "kind": { "const": "decision-record" } }
+          },
+          "details": { "$ref": "#/$defs/adr_details" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "role": { "const": "audit" } } },
+      "then": {
+        "properties": {
+          "uid": { "pattern": "^audit-" },
+          "state": { "enum": ["draft", "final", "superseded"] },
+          "authority": {
+            "properties": { "kind": { "const": "point-in-time-evidence" } }
+          },
+          "details": { "$ref": "#/$defs/audit_details" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "role": { "const": "research" } } },
+      "then": {
+        "properties": {
+          "uid": { "pattern": "^research-" },
+          "state": {
+            "enum": [
+              "planned",
+              "active",
+              "concluded",
+              "inconclusive",
+              "superseded"
+            ]
+          },
+          "authority": {
+            "properties": { "kind": { "const": "research-record" } }
+          },
+          "details": { "$ref": "#/$defs/research_details" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "role": { "const": "lesson" } } },
+      "then": {
+        "properties": {
+          "uid": { "pattern": "^lesson-" },
+          "state": { "enum": ["draft", "standing", "superseded"] },
+          "authority": {
+            "properties": { "kind": { "const": "reusable-inference" } }
+          },
+          "details": { "$ref": "#/$defs/lesson_details" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "role": { "const": "handoff" } } },
+      "then": {
+        "properties": {
+          "uid": { "pattern": "^handoff-" },
+          "state": { "enum": ["current", "superseded"] },
+          "authority": {
+            "properties": { "kind": { "const": "continuation-state" } }
+          },
+          "details": { "$ref": "#/$defs/handoff_details" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonempty": { "type": "string", "minLength": 1 },
+    "uid": {
+      "type": "string",
+      "pattern": "^(task|adr|audit|research|lesson|handoff)-[0-9]{8}T[0-9]{12}Z-[0-9a-f]{8}$"
+    },
+    "nonempty_strings": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonempty" },
+      "uniqueItems": true
+    },
+    "strings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonempty" },
+      "uniqueItems": true
+    },
+    "reference": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*:[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$"
+    },
+    "references": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reference" },
+      "uniqueItems": true
+    },
+    "criterion_references": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^criterion:AC-[1-9][0-9]*$"
+      },
+      "uniqueItems": true
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "owner", "scope"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "work-state",
+            "decision-record",
+            "point-in-time-evidence",
+            "research-record",
+            "reusable-inference",
+            "continuation-state"
+          ]
+        },
+        "owner": { "$ref": "#/$defs/nonempty" },
+        "scope": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "at", "reason"],
+      "properties": {
+        "from": { "$ref": "#/$defs/nonempty" },
+        "to": { "$ref": "#/$defs/nonempty" },
+        "at": { "type": "string", "format": "date" },
+        "reason": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "target"],
+      "properties": {
+        "type": {
+          "enum": [
+            "refined-by",
+            "decided-by",
+            "implemented-by",
+            "verified-by",
+            "evidenced-by",
+            "validated-by",
+            "superseded-by",
+            "depends-on",
+            "continues",
+            "derived-from",
+            "dispositions"
+          ]
+        },
+        "target": { "$ref": "#/$defs/reference" },
+        "note": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verified_on": { "type": "string", "format": "date" },
+        "review_after": { "type": "string", "format": "date" },
+        "reverify_on": { "$ref": "#/$defs/nonempty_strings" }
+      },
+      "minProperties": 1
+    },
+    "task_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criteria"],
+      "properties": {
+        "criteria": { "$ref": "#/$defs/criterion_references" },
+        "blocker": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "adr_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_date", "deciders"],
+      "properties": {
+        "decision_date": { "type": "string", "format": "date" },
+        "deciders": { "$ref": "#/$defs/nonempty_strings" },
+        "revisit_on": { "$ref": "#/$defs/nonempty_strings" }
+      }
+    },
+    "audit_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["as_of", "subjects", "method", "limitations"],
+      "properties": {
+        "as_of": { "type": "string", "format": "date" },
+        "subjects": { "$ref": "#/$defs/nonempty_strings" },
+        "method": { "$ref": "#/$defs/nonempty" },
+        "limitations": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "research_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "started", "method", "limitations"],
+      "properties": {
+        "question": { "$ref": "#/$defs/nonempty" },
+        "started": { "type": "string", "format": "date" },
+        "method": { "$ref": "#/$defs/nonempty" },
+        "limitations": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "lesson_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "boundary"],
+      "properties": {
+        "observed_at": { "type": "string", "format": "date" },
+        "boundary": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "handoff_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured_at",
+        "repository",
+        "revision",
+        "objective",
+        "completed",
+        "open_work",
+        "blockers",
+        "authority_refs",
+        "resume"
+      ],
+      "properties": {
+        "captured_at": { "type": "string", "format": "date-time" },
+        "repository": { "$ref": "#/$defs/nonempty" },
+        "revision": { "$ref": "#/$defs/nonempty" },
+        "objective": { "$ref": "#/$defs/nonempty" },
+        "completed": { "$ref": "#/$defs/references" },
+        "open_work": { "$ref": "#/$defs/references" },
+        "blockers": { "$ref": "#/$defs/strings" },
+        "authority_refs": { "$ref": "#/$defs/nonempty_strings" },
+        "resume": { "$ref": "#/$defs/nonempty" }
+      }
+    }
+  }
+}

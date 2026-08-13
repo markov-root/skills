@@ -1,0 +1,26 @@
+{
+  "$id": "https://cesia.org/schemas/debate.affordance-policy/1.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Declared tool access.\n\nNon-default values are rejected by ``VoiceInput`` until task 0059 supplies the runtime.  The\nmodel exists now so capability negotiation has one stable vocabulary and unsupported claims\ncannot masquerade as active behavior.",
+  "properties": {
+    "filesystem": {
+      "default": "none",
+      "enum": [
+        "none",
+        "project_read"
+      ],
+      "title": "Filesystem",
+      "type": "string"
+    },
+    "web_search": {
+      "default": false,
+      "title": "Web Search",
+      "type": "boolean"
+    }
+  },
+  "title": "AffordancePolicyInput",
+  "type": "object",
+  "x-schema-id": "debate.affordance-policy",
+  "x-schema-version": "1.0.0"
+}

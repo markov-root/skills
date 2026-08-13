@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Relocatable agent-facing launcher for the bundled Debate runtime.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! command -v uv >/dev/null 2>&1; then
+  echo "error: debate requires uv; install uv, then retry" >&2
+  exit 127
+fi
+
+export DEBATE_HOME="${DEBATE_HOME:-$HOME/Skills/exported-data/debates}"
+exec uv run --script "$SCRIPT_DIR/debate_cli.py" "$@"

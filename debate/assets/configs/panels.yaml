@@ -1,0 +1,89 @@
+# Panel registry. Define each debate council ONCE here and reference it by name (`--panel <name>`).
+# Bumping a vendor's flagship is then a one-line change in ONE place. This file is the contract
+# `debate/panels.py:resolve_cast()` reads. A panel = proposers + a red-team + an arbitrator, each a
+# debater spec in the build_debater shape ({id, backend, model?}).
+#
+# NOTE (verify before spending): the OpenRouter model slugs below are starting points carried over
+# from the source pipeline. Check them against https://openrouter.ai/models and pin to current
+# flagships before a real run — a stale slug fails fast at call time, not silently.
+#
+# `self_exclude: by_vendor` (optional) drops a named subject's own vendor from the panel — use it
+# when the debate is ABOUT one vendor's work and you don't want that vendor adjudicating itself.
+# Off by default for general questions.
+
+schema_id: debate.panel-registry
+schema_version: 1.0.0
+panels:
+  dev-cc:
+    description: >
+      Monovendor Claude CLI subscription panel. Dev / iteration / smoke work only: calls execute
+      remotely and require the installed account. Shared priors make agreement weak evidence.
+    proposers:
+      - { id: cc-1, backend: claude_code }
+      - { id: cc-2, backend: claude_code }
+      - { id: cc-3, backend: claude_code }
+    redteam: { id: cc-rt, backend: claude_code }
+    arbitrator: { id: cc-arb, backend: claude_code }
+
+  smoke-cc:
+    description: >
+      Single remote Claude CLI voice + arbitrator, no red-team. Smallest path to exercise the
+      pipeline end to end (4 subscription calls). Smoke work only — one voice is not a panel.
+    proposers:
+      - { id: cc-1, backend: claude_code }
+    arbitrator: { id: cc-arb, backend: claude_code }
+
+  panel-or:
+    description: >
+      All-OpenRouter cross-vendor council (NO Claude). Use for SENSITIVE domains (CBRN/bio/cyber)
+      where the Claude CLI backend refuses on AUP grounds, and whenever the debate subject is
+      Anthropic/Claude itself (avoids same-vendor-as-subject). Proposers span three training
+      ecosystems; a fourth vendor (Gemini) red-teams and arbitrates, so no proposer adjudicates its
+      own blinded set. Every call is remotely processed and metered.
+    proposers:
+      - { id: kimi, backend: openrouter, model: moonshotai/kimi-k2.6 }
+      - { id: glm, backend: openrouter, model: z-ai/glm-5.2 }
+      - { id: deepseek, backend: openrouter, model: deepseek/deepseek-v4-pro }
+    redteam: { id: rt, backend: openrouter, model: google/gemini-3.5-flash }
+    arbitrator: { id: arb, backend: openrouter, model: google/gemini-3.5-flash }
+
+  panel-v1:
+    description: >
+      Cross-vendor council: kimi + glm + deepseek (OpenRouter) + Claude CLI. Four distinct training
+      ecosystems reduce shared-provider correlation but do not make agreement proof. The red-team
+      and arbitrator use the remote Claude CLI; the arbitrator sees blinded sets.
+    proposers:
+      - { id: kimi, backend: openrouter, model: moonshotai/kimi-k2.6 }
+      - { id: glm, backend: openrouter, model: z-ai/glm-5.2 }
+      - { id: deepseek, backend: openrouter, model: deepseek/deepseek-v4-pro }
+      - { id: claude, backend: claude_code, model: claude-opus-4-8 }
+    redteam: { id: rt, backend: claude_code, model: claude-opus-4-8 }
+    arbitrator: { id: arb, backend: claude_code, model: claude-opus-4-8 }
+
+  duo-fast:
+    description: >
+      Two-vendor lean council for fast propose-review iteration: Claude CLI + Codex CLI, using the
+      installed remote subscriptions (Codex pinned to medium reasoning). No OpenRouter voice and no
+      red-team round: propose -> critique -> revise -> aggregate, 7 calls. Arbitrator = Claude on
+      blinded sets. Use for human-in-the-loop iteration; escalate to an adversarial panel if useful.
+    proposers:
+      - { id: claude, backend: claude_code, model: claude-opus-4-8 }
+      - {
+          id: gpt,
+          backend: codex_cli,
+          model: gpt-5.5,
+          call_policy: { reasoning_effort: medium },
+        }
+    arbitrator: { id: arb, backend: claude_code, model: claude-opus-4-8 }
+
+  tri-cli:
+    description: >
+      Three-vendor council: remote Claude CLI and Codex CLI subscription voices plus a metered
+      OpenRouter GLM voice. Red-team + arbitrator use Claude CLI; the arbitrator sees blinded sets.
+      Use when cross-provider perspectives justify the remote calls and OpenRouter spend.
+    proposers:
+      - { id: claude, backend: claude_code, model: claude-opus-4-8 }
+      - { id: gpt, backend: codex_cli, model: gpt-5.5 }
+      - { id: glm, backend: openrouter, model: z-ai/glm-5.2 }
+    redteam: { id: rt, backend: claude_code, model: claude-opus-4-8 }
+    arbitrator: { id: arb, backend: claude_code, model: claude-opus-4-8 }

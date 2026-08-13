@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/software-engineering/dependency-evidence-v1.schema.json",
+  "title": "Dependency evidence import v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "population",
+    "status",
+    "required",
+    "truncated",
+    "package_count",
+    "source",
+    "source_artifacts",
+    "advisories",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "population": {
+      "enum": ["local-production", "local-full", "provider"]
+    },
+    "status": {
+      "enum": ["passed", "failed", "unavailable", "not_applicable"]
+    },
+    "required": {
+      "type": "boolean"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "package_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "version", "captured_at", "expires_at"],
+      "properties": {
+        "kind": {
+          "enum": ["local-scanner-export", "provider-export"]
+        },
+        "name": {
+          "$ref": "#/$defs/identity"
+        },
+        "version": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/identity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "source_artifacts": {
+      "type": "array",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500,
+        "pattern": "^[^\\\\\\u0000-\\u001f\\u007f]+$"
+      }
+    },
+    "advisories": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "ecosystem",
+          "package",
+          "version",
+          "applicability",
+          "direct",
+          "development",
+          "transitive"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/identity"
+          },
+          "ecosystem": {
+            "$ref": "#/$defs/identity"
+          },
+          "package": {
+            "$ref": "#/$defs/identity"
+          },
+          "version": {
+            "$ref": "#/$defs/identity"
+          },
+          "applicability": {
+            "enum": ["affected", "not_affected", "unknown"]
+          },
+          "direct": {
+            "$ref": "#/$defs/nullable_boolean"
+          },
+          "development": {
+            "$ref": "#/$defs/nullable_boolean"
+          },
+          "transitive": {
+            "$ref": "#/$defs/nullable_boolean"
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/$defs/identity"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "population": {
+            "const": "provider"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "properties": {
+              "kind": {
+                "const": "provider-export"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "source": {
+            "properties": {
+              "kind": {
+                "const": "local-scanner-export"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "advisories": {
+            "items": {
+              "properties": {
+                "applicability": {
+                  "const": "not_affected"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "nullable_boolean": {
+      "type": ["boolean", "null"]
+    }
+  }
+}
