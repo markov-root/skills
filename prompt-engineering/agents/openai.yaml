@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prompt Engineering"
+  short_description: "Design and evaluate reliable LLM prompts"
+  default_prompt: "Use $prompt-engineering to design or improve this prompt and its evaluation plan."

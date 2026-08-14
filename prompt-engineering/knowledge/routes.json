@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "capabilities": [
+    "image-generation",
+    "animate",
+    "openrouter-video"
+  ],
+  "routes": [
+    {
+      "id": "agent_system",
+      "task": "System prompts, AGENTS.md/CLAUDE.md, personas, and single-agent instructions",
+      "required": ["context-engineering.md", "structure.md"],
+      "optional": ["model-era.md", "checklist.md"],
+      "delegate": null,
+      "patterns": ["system prompt", "agents.md", "claude.md", "persona"]
+    },
+    {
+      "id": "agentic_tools",
+      "task": "Tool descriptions, tool-use policy, delegation, handoffs, subagents, and multi-agent orchestration",
+      "required": ["agentic-tools.md", "agentic-contracts.md"],
+      "optional": ["context-engineering.md", "structured-output.md", "llm-as-judge.md"],
+      "delegate": null,
+      "patterns": ["tool description", "tool-use prompt", "delegation prompt", "handoff prompt", "subagent prompt", "multi-agent", "agent orchestration"]
+    },
+    {
+      "id": "llm_judge",
+      "task": "LLM-as-judge prompts and scoring rubrics",
+      "required": ["llm-as-judge.md", "checklist.md"],
+      "optional": ["techniques.md", "anti-patterns.md", "model-era.md"],
+      "delegate": null,
+      "patterns": ["llm as judge", "llm-as-judge", "judge rubric", "scoring rubric", "grader prompt"]
+    },
+    {
+      "id": "prompt_evaluation",
+      "task": "Prompt eval sets, A/B experiments, automatic optimization, release gates, and model-upgrade regression",
+      "required": ["prompt-evaluation.md", "prompt-eval-templates.md"],
+      "optional": ["llm-as-judge.md", "checklist.md", "model-era.md"],
+      "delegate": null,
+      "patterns": ["prompt evaluation", "prompt eval", "prompt a/b test", "prompt ab test", "prompt regression", "prompt optimizer", "evaluate prompt variants"]
+    },
+    {
+      "id": "vision_understanding",
+      "task": "Image/screenshot analysis, OCR, visual table extraction, document QA, and bounding-box grounding",
+      "required": ["vision-understanding.md", "vision-templates.md"],
+      "optional": ["structured-output.md", "rag-retrieval.md", "checklist.md"],
+      "delegate": null,
+      "patterns": ["analyze this image", "read this screenshot", "ocr", "document qa", "document question answering", "extract table from image", "bounding box prompt"]
+    },
+    {
+      "id": "structured_output",
+      "task": "Extraction, classification, schemas, enums, and strict structured output",
+      "required": ["structured-output.md", "structured-output-templates.md"],
+      "optional": ["structure.md", "model-era.md", "anti-patterns.md", "techniques.md", "checklist.md"],
+      "delegate": null,
+      "patterns": ["extract", "classification", "classify", "schema", "enum", "structured output"]
+    },
+    {
+      "id": "rag",
+      "task": "RAG, retrieval/query construction, grounded answers, and citation prompts",
+      "required": ["rag-retrieval.md", "rag-templates.md"],
+      "optional": ["context-engineering.md", "structure.md", "checklist.md"],
+      "delegate": null,
+      "patterns": ["rag prompt", "retrieval prompt", "retrieval query", "grounded answer", "citation prompt"]
+    },
+    {
+      "id": "translation_localization",
+      "task": "Translation, localization, transcreation, terminology constraints, and multilingual QA",
+      "required": ["translation-localization.md", "translation-templates.md"],
+      "optional": ["structured-output.md", "llm-as-judge.md", "checklist.md"],
+      "delegate": null,
+      "patterns": ["translate this", "translation prompt", "localize this", "localization prompt", "transcreation prompt", "terminology-constrained translation"]
+    },
+    {
+      "id": "technique_selection",
+      "task": "Choose prompting techniques or tune for a reasoning-era model",
+      "required": ["techniques.md", "model-era.md"],
+      "optional": ["anti-patterns.md"],
+      "delegate": null,
+      "patterns": ["few-shot", "few shot", "chain of thought", "cot prompt", "reasoning effort", "prompting technique"]
+    },
+    {
+      "id": "general_prompt",
+      "task": "Author, diagnose, or substantially revise a general LLM-facing prompt",
+      "required": ["structure.md", "checklist.md"],
+      "optional": ["techniques.md", "model-era.md", "anti-patterns.md"],
+      "delegate": null,
+      "patterns": ["improve this prompt", "write a prompt", "rewrite this prompt", "diagnose this prompt"]
+    },
+    {
+      "id": "delegate_image",
+      "task": "Image generation or image editing",
+      "required": [],
+      "optional": [],
+      "delegate": "image-generation",
+      "patterns": ["generate an image", "create an image", "edit this image", "image prompt", "inpaint", "restyle"]
+    },
+    {
+      "id": "delegate_animate",
+      "task": "Turn a still image into a finished loop",
+      "required": [],
+      "optional": [],
+      "delegate": "animate",
+      "patterns": ["animate this image", "animate this still", "make this image loop", "still into a loop"]
+    },
+    {
+      "id": "delegate_video",
+      "task": "Raw or custom text-to-video/image-to-video generation",
+      "required": [],
+      "optional": [],
+      "delegate": "openrouter-video",
+      "patterns": ["generate a video", "text to video", "text-to-video", "image to video", "image-to-video", "raw video"]
+    }
+  ]
+}

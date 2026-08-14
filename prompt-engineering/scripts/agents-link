@@ -1,0 +1,54 @@
+#!/bin/sh
+# Converge repository instructions on one real AGENTS.md plus CLAUDE.md symlink.
+set -eu
+
+dir="${1:-.}"
+cd "$dir"
+agents="AGENTS.md"
+claude="CLAUDE.md"
+
+path_exists() {
+  [ -f "$1" ] || [ -d "$1" ] || [ -L "$1" ]
+}
+
+link_ok() {
+  [ -L "$claude" ] && [ "$(readlink "$claude")" = "$agents" ]
+}
+
+if [ -L "$agents" ]; then
+  echo "agents-link: $dir/$agents is a symlink — AGENTS.md must be the real instruction file; CLAUDE.md should symlink to it." >&2
+  exit 1
+fi
+
+if path_exists "$agents" && [ -f "$claude" ] && [ ! -L "$claude" ]; then
+  echo "agents-link: BOTH $dir/$agents and a real $dir/$claude exist — refusing to clobber." >&2
+  echo "  Reconcile first (they may have drifted): diff '$agents' '$claude'" >&2
+  exit 1
+fi
+
+if ! path_exists "$agents" && [ -f "$claude" ] && [ ! -L "$claude" ]; then
+  mv "$claude" "$agents"
+  ln -s "$agents" "$claude"
+  echo "agents-link: $dir/$claude is now real $agents + symlink"
+  exit 0
+fi
+
+if path_exists "$agents"; then
+  if link_ok; then
+    echo "agents-link: $dir already conformant (CLAUDE.md -> AGENTS.md)"
+    exit 0
+  fi
+  if path_exists "$claude" && [ ! -L "$claude" ]; then
+    echo "agents-link: $dir/$claude is not a replaceable symlink — refusing to clobber." >&2
+    exit 1
+  fi
+  if [ -L "$claude" ]; then
+    rm -f "$claude"
+  fi
+  ln -s "$agents" "$claude"
+  echo "agents-link: fixed $dir/$claude -> $agents"
+  exit 0
+fi
+
+echo "agents-link: no AGENTS.md or CLAUDE.md in $dir — nothing to link." >&2
+exit 1
