@@ -1,0 +1,300 @@
+{
+  "$id": "https://debate.local/schemas/doctor.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "exit_code": {
+            "const": 1
+          },
+          "smallest_runnable_panel": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "properties": {
+          "exit_code": {
+            "const": 0
+          },
+          "smallest_runnable_panel": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "backends": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "authenticated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "backend": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "detail": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "api",
+              "cli"
+            ]
+          },
+          "remediation": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "backend",
+          "kind",
+          "available",
+          "authenticated",
+          "detail",
+          "remediation"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "debates_home": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "override": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "--out",
+            "DEBATE_HOME",
+            "platform default"
+          ]
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "source",
+        "exists",
+        "writable",
+        "detail",
+        "override"
+      ],
+      "type": "object"
+    },
+    "environment": {
+      "additionalProperties": false,
+      "properties": {
+        "offline_cache": {
+          "additionalProperties": false,
+          "properties": {
+            "detail": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "warm": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "warm",
+            "detail"
+          ],
+          "type": "object"
+        },
+        "python": {
+          "additionalProperties": false,
+          "properties": {
+            "requirement": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "supported": {
+              "type": "boolean"
+            },
+            "version": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "version",
+            "supported",
+            "requirement"
+          ],
+          "type": "object"
+        },
+        "uv": {
+          "additionalProperties": false,
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "available",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "python",
+        "uv",
+        "offline_cache"
+      ],
+      "type": "object"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "panels": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "backends": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "missing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backend": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "detail": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "remediation": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "backend",
+                "detail",
+                "remediation"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "runnable": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "RUNNABLE",
+              "BLOCKED"
+            ]
+          },
+          "voice_count": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "runnable",
+          "voice_count",
+          "backends",
+          "missing"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "debate.doctor"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "smallest_runnable_panel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "ok",
+    "exit_code",
+    "backends",
+    "panels",
+    "smallest_runnable_panel",
+    "debates_home",
+    "environment"
+  ],
+  "title": "Debate doctor report",
+  "type": "object"
+}

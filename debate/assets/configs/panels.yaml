@@ -33,6 +33,15 @@ panels:
       - { id: cc-1, backend: claude_code }
     arbitrator: { id: cc-arb, backend: claude_code }
 
+  smoke-or:
+    description: >
+      Single inexpensive OpenRouter voice + arbitrator, no red-team. Smallest OpenRouter-only path
+      to exercise the pipeline end to end (4 metered calls). Smoke work only — one voice is not a
+      panel, and doctor checks only credential configuration rather than live model availability.
+    proposers:
+      - { id: or-1, backend: openrouter, model: google/gemini-3.1-flash-lite }
+    arbitrator: { id: or-arb, backend: openrouter, model: google/gemini-3.1-flash-lite }
+
   panel-or:
     description: >
       All-OpenRouter cross-vendor council (NO Claude). Use for SENSITIVE domains (CBRN/bio/cyber)

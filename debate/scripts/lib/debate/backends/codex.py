@@ -3,13 +3,57 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from debate.backends.base import AtCapacity, EmptyCompletion, _raise_cli_failure, _retry
+from debate.backends.base import (
+    AtCapacity,
+    BackendProbe,
+    EmptyCompletion,
+    _probe_cli,
+    _raise_cli_failure,
+    _retry,
+)
 from debate.config import get_settings
+
+_CURRENT_AUTH_STATUS = (
+    re.compile(r"^logged in using chatgpt$", re.IGNORECASE),
+    re.compile(r"^logged in as \S+$", re.IGNORECASE),
+)
+_NONCURRENT_AUTH_CONTEXT = (
+    "become logged in",
+    "to continue",
+    "last logged in",
+    "log in to",
+)
+_BENIGN_AUTH_WRAPPER_LINE = (
+    "WARNING: proceeding, even though we could not create PATH aliases: "
+    "Read-only file system (os error 30)"
+)
+
+
+def _codex_auth_evidence(stdout: str, stderr: str) -> bool | None:
+    """Recognize only the complete response shape emitted by ``codex login status``.
+
+    On the verified local CLI, both its status and a sandbox-specific PATH warning are written to
+    stderr. Therefore stdout lines followed by stderr lines form one ordered response. The only
+    accepted shapes are a status line alone or that exact warning followed by one status line.
+    """
+    lines = [line.strip() for line in (*stdout.splitlines(), *stderr.splitlines()) if line.strip()]
+    lowered = "\n".join(lines).lower()
+    if any(marker in lowered for marker in _NONCURRENT_AUTH_CONTEXT):
+        return None
+    status = None
+    if len(lines) == 1:
+        status = lines[0]
+    elif len(lines) == 2 and lines[0] == _BENIGN_AUTH_WRAPPER_LINE:
+        status = lines[1]
+    if status is not None and any(pattern.fullmatch(status) for pattern in _CURRENT_AUTH_STATUS):
+        return True
+    return None
 
 
 @dataclass
@@ -31,6 +75,17 @@ class CodexCliDebater:
     max_retries: int | None = None
     workspace: str | None = None  # materials_mode 'disk' (ADR-0010): working root it may READ
     last_meta: dict = field(default_factory=dict)
+
+    @classmethod
+    def probe(cls) -> BackendProbe:
+        """Check the executable and ChatGPT auth without submitting a prompt."""
+        return _probe_cli(
+            backend=cls.backend,
+            executable="codex",
+            auth_args=("login", "status"),
+            auth_evidence=_codex_auth_evidence,
+            login_hint="run `codex login`",
+        )
 
     def generate(self, system: str, user: str, *, want_json: bool = False) -> str:
         timeout = self.timeout_s or get_settings().codex_cli_timeout_s

@@ -8,5 +8,4 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 127
 fi
 
-export DEBATE_HOME="${DEBATE_HOME:-$HOME/Skills/exported-data/debates}"
 exec uv run --script "$SCRIPT_DIR/debate_cli.py" "$@"

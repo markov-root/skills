@@ -7,13 +7,18 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
+import platform
+import shutil
 import sys
+from functools import cache
 from pathlib import Path
 
 from debate.cli.resolve import (
     _apply_materials_mode,
     _debate_key,
     _debates_root,
+    _debates_root_source,
     _find_debates,
     _protocol,
     _repo_root,
@@ -46,6 +51,166 @@ def cmd_panels(args: argparse.Namespace) -> int:
         desc = " ".join((p.get("description") or "").split())
         print(f"\n{name}\n  proposers: {proposers}{rt}\n  {desc}")
     return 0
+
+
+def _path_writable(path: Path) -> tuple[bool, bool, str]:
+    """Check an existing directory or the closest existing parent without creating anything."""
+    if path.exists():
+        writable = path.is_dir() and os.access(path, os.W_OK)
+        detail = "directory exists" if path.is_dir() else "path exists but is not a directory"
+        return writable, True, detail
+    parent = path
+    while not parent.exists() and parent != parent.parent:
+        parent = parent.parent
+    writable = parent.is_dir() and os.access(parent, os.W_OK)
+    detail = (
+        f"would be created under writable parent {parent}"
+        if writable
+        else f"parent {parent} is not writable"
+    )
+    return writable, False, detail
+
+
+def _doctor_environment() -> dict:
+    uv_path = shutil.which("uv")
+    return {
+        "python": {
+            "version": platform.python_version(),
+            "supported": sys.version_info >= (3, 11),
+            "requirement": ">=3.11,<4",
+        },
+        "uv": {"available": uv_path is not None, "path": uv_path},
+        # Deep cache inspection is deliberately deferred: a lock file proves reproducibility, not
+        # that every wheel/interpreter needed by this machine is already cached.
+        "offline_cache": {
+            "warm": None,
+            "detail": "not assessed; run once online before relying on UV_OFFLINE=1",
+        },
+    }
+
+
+def _doctor_panels(probes: dict) -> list[dict]:
+    from debate.panels import _load
+
+    rows = []
+    for name, panel in sorted(_load().items()):
+        voices = [*panel["proposers"], panel["arbitrator"]]
+        if panel.get("redteam"):
+            voices.append(panel["redteam"])
+        backend_names = sorted({voice.get("backend", "openrouter") for voice in voices})
+        missing = []
+        for backend in backend_names:
+            probe = probes.get(backend)
+            if probe is None:
+                missing.append(
+                    {
+                        "backend": backend,
+                        "detail": "backend has no registered capability probe",
+                        "remediation": "Install or register an adapter for this backend.",
+                    }
+                )
+            elif not probe.runnable:
+                missing.append(
+                    {
+                        "backend": backend,
+                        "detail": probe.detail,
+                        "remediation": probe.remediation,
+                    }
+                )
+        rows.append(
+            {
+                "name": name,
+                "status": "RUNNABLE" if not missing else "BLOCKED",
+                "runnable": not missing,
+                "voice_count": len(voices),
+                "backends": backend_names,
+                "missing": missing,
+            }
+        )
+    return rows
+
+
+@cache
+def _doctor_validator():
+    from jsonschema import Draft202012Validator
+
+    from debate._resources import resource_path
+
+    schema = json.loads(resource_path("schemas", "doctor.schema.json").read_text())
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _doctor_document(args: argparse.Namespace) -> dict:
+    from debate import backends
+
+    probes = backends.probe_backends()
+    panels = _doctor_panels(probes)
+    runnable = [row for row in panels if row["runnable"]]
+    smallest = (
+        min(runnable, key=lambda row: (row["voice_count"], row["name"])) if runnable else None
+    )
+    home = _debates_root(args)
+    writable, exists, detail = _path_writable(home)
+    exit_code = 0 if smallest else 1
+    document = {
+        "schema_id": "debate.doctor",
+        "schema_version": "1.0.0",
+        "ok": exit_code == 0,
+        "exit_code": exit_code,
+        "backends": [probes[name].to_dict() for name in sorted(probes)],
+        "panels": panels,
+        "smallest_runnable_panel": smallest["name"] if smallest else None,
+        "debates_home": {
+            "path": str(home),
+            "source": _debates_root_source(args),
+            "exists": exists,
+            "writable": writable,
+            "detail": detail,
+            "override": "use --out DIR for one command or set DEBATE_HOME",
+        },
+        "environment": _doctor_environment(),
+    }
+    _doctor_validator().validate(document)
+    return document
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Report local capabilities and panel readiness without making a model call."""
+    document = _doctor_document(args)
+    if args.json:
+        print(json.dumps(document, indent=2, sort_keys=True))
+        return document["exit_code"]
+
+    print("Debate doctor (no model calls)")
+    print("Backends:")
+    for probe in document["backends"]:
+        auth = {True: "yes", False: "no", None: "unknown"}[probe["authenticated"]]
+        available = "yes" if probe["available"] else "no"
+        print(f"  {probe['backend']:12} available={available:3} authenticated={auth}")
+        print(f"    {probe['detail']}")
+        if not (probe["available"] and probe["authenticated"] is True):
+            print(f"    remediation: {probe['remediation']}")
+    print("Panels:")
+    for panel in document["panels"]:
+        print(f"  {panel['status']:8} {panel['name']} ({', '.join(panel['backends'])})")
+        for missing in panel["missing"]:
+            print(f"    {missing['backend']}: {missing['remediation']}")
+    smallest = document["smallest_runnable_panel"] or "none"
+    print(f"Smallest runnable panel: {smallest}")
+    home = document["debates_home"]
+    print(
+        f"Debates home: {home['path']} (source={home['source']}, "
+        f"writable={'yes' if home['writable'] else 'no'})"
+    )
+    print(f"  {home['detail']}; {home['override']}")
+    env = document["environment"]
+    print(
+        f"Environment: Python {env['python']['version']} "
+        f"({'ok' if env['python']['supported'] else 'unsupported'}); "
+        f"uv={'yes' if env['uv']['available'] else 'no'}; offline cache=unknown"
+    )
+    return document["exit_code"]
 
 
 # --------------------------------------------------------------------------- run / cost
@@ -87,8 +252,8 @@ def cmd_new(args: argparse.Namespace) -> int:
 _CONTRACT = """\
 debate — data/API contract (ADR-0008/0009/0010/0024)
 
-INPUTS: a debate PROJECT dir under the debates root (--out, $DEBATE_HOME, or the configured
-compatibility default; never in the source checkout or docs/). Make one:
+INPUTS: a debate PROJECT dir under the debates root (--out, $DEBATE_HOME, or the platform user-data
+default; never in the source checkout or docs/). Make one:
 `debate new <slug> --panel <p> --item paper.md`:
   <project>/
     items/v0.1.0.md  versioned drafts of the debated item; `--item items/v0.2.0.md` picks one
@@ -107,8 +272,9 @@ and owner-root path escapes fail before run-directory/backend creation. Generate
 assets/schemas/inputs/; use `debate contract` for the human-readable boundary.
 
 TRIGGER (agent-friendly, all params/args):
+  debate doctor [--json] [--out DIR]                    # capabilities/panels, NO model call
   debate new  <slug> --panel <p> [--item f.md] [--question Q] [--out DIR]
-  debate materials {fetch,prep,all} <project> [--backend codex_cli --model gpt-5.5]
+  debate materials {fetch,prep,all} <project> [--backend B --model M]
   debate cost <project|spec> [--panel P]                 # resolved plan/reducer + cost, NO calls
   debate run  <project> [--panel P] [--item f.md] [--run-name R] [--materials-mode M] [--lean]
   debate show <slug>/runs/<R> [--out DIR] ; debate status [--out DIR]
@@ -166,6 +332,8 @@ def cmd_materials(args: argparse.Namespace) -> int:
 
 
 def cmd_cost(args: argparse.Namespace) -> int:
+    from debate import backends
+
     try:
         target, resolved = _resolve_preview(args)
     except ValueError as exc:
@@ -176,6 +344,11 @@ def cmd_cost(args: argparse.Namespace) -> int:
     cast = resolved.cast
     plan = resolved.engine_plan
     aggregator = resolved.aggregator_id
+    try:
+        backends.require_backend_readiness(cast, include_redteam=plan.has_adversary)
+    except backends.BackendPreflightError as exc:
+        print(f"backend preflight failed: {exc}", file=sys.stderr)
+        return 1
     counts = _plan_call_counts(plan, len(cast["debaters"]))
     uses_rt = plan.has_adversary
     print("DRY RUN — no model calls made.")
@@ -298,9 +471,7 @@ def _resolve_preview(args: argparse.Namespace):
         mode = getattr(args, "materials_mode", None) or spec.get("materials_mode", "context")
         _apply_materials_mode(mode, cast, spec, str(project_dir))
         prompts_dir = project_dir / "prompts"
-        run_name = (
-            getattr(args, "run_name", None) or args.panel or cast.get("panel") or "default"
-        )
+        run_name = getattr(args, "run_name", None) or args.panel or cast.get("panel") or "default"
         run_id = f"{project_dir.name}/{run_name}"
     else:
         from debate.runspec import load_runspec
@@ -468,10 +639,14 @@ def _validate_execution_contract(task, plan, aggregator: str | None) -> str:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    from debate.backends import BackendPreflightError
     from debate.runtime import ResolutionError, write_resolved_run_plan
 
     try:
         _folder, run_dir, resolved, display = _resolve_run(args)
+    except BackendPreflightError as exc:
+        print(f"backend preflight failed: {exc}", file=sys.stderr)
+        return 1
     except ValueError as exc:
         print(f"invalid debate configuration: {exc}", file=sys.stderr)
         return 1

@@ -10,6 +10,8 @@ import json
 import logging
 import random
 import re
+import shutil
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -22,6 +24,162 @@ from openai import OpenAI
 from debate.config import get_settings
 
 _log = logging.getLogger("debate.backends")
+
+
+@dataclass(frozen=True)
+class BackendProbe:
+    """Side-effect-free local readiness result shared by doctor, cost, and run.
+
+    ``authenticated`` is tri-state: ``None`` means the installed adapter could not establish a
+    local auth state without making a model call. Callers must not silently treat that as ready.
+    """
+
+    backend: str
+    kind: str
+    available: bool
+    authenticated: bool | None
+    detail: str
+    remediation: str
+
+    @property
+    def runnable(self) -> bool:
+        return self.available and self.authenticated is True
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _first_line(text: str, *, limit: int = 160) -> str:
+    """Return one bounded diagnostic line; auth command output is never surfaced verbatim."""
+    return " ".join(text.strip().split())[:limit]
+
+
+def _probe_cli(
+    *,
+    backend: str,
+    executable: str,
+    auth_args: tuple[str, ...],
+    auth_evidence: Callable[[str, str], bool | None],
+    login_hint: str,
+    env: dict[str, str] | None = None,
+) -> BackendProbe:
+    """Probe one CLI using only version and auth-status commands.
+
+    Neither command submits a prompt. Authentication output may contain account information, so
+    the public detail reports only the interpreted status and the bounded version line. A zero
+    return code is insufficient on its own: the adapter must positively recognize signed-in output.
+    """
+    path = shutil.which(executable)
+    install_hint = f"Install {executable} and ensure `{executable}` is on PATH."
+    if path is None:
+        return BackendProbe(
+            backend, "cli", False, False, f"{executable} not found on PATH", install_hint
+        )
+
+    try:
+        version = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return BackendProbe(
+            backend,
+            "cli",
+            False,
+            None,
+            f"{executable} was found but its version probe failed ({type(exc).__name__})",
+            f"Repair or reinstall {executable}, then retry `{executable} --version`.",
+        )
+    version_text = _first_line(version.stdout or version.stderr) or "version not reported"
+    if version.returncode != 0:
+        return BackendProbe(
+            backend,
+            "cli",
+            False,
+            None,
+            f"{executable} --version exited {version.returncode}",
+            f"Repair or reinstall {executable}, then retry `{executable} --version`.",
+        )
+
+    try:
+        auth = subprocess.run(
+            [path, *auth_args],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return BackendProbe(
+            backend,
+            "cli",
+            True,
+            None,
+            f"{version_text}; auth status unknown ({type(exc).__name__})",
+            f"Run `{executable} {' '.join(auth_args)}`; if needed, {login_hint}.",
+        )
+    auth_text = f"{auth.stdout}\n{auth.stderr}".lower()
+    explicitly_signed_out = any(
+        marker in auth_text
+        for marker in (
+            "not logged in",
+            "not authenticated",
+            "login required",
+            "no credentials",
+            "unauthorized",
+        )
+    )
+    if explicitly_signed_out:
+        return BackendProbe(
+            backend,
+            "cli",
+            True,
+            False,
+            f"{version_text}; auth status reports signed out",
+            f"{login_hint}, then verify with `{executable} {' '.join(auth_args)}`.",
+        )
+
+    evidence = auth_evidence(auth.stdout, auth.stderr)
+    if auth.returncode == 0 and evidence is True:
+        return BackendProbe(
+            backend,
+            "cli",
+            True,
+            True,
+            f"{version_text}; auth status reports signed in",
+            "No action required.",
+        )
+    if evidence is False:
+        return BackendProbe(
+            backend,
+            "cli",
+            True,
+            False,
+            f"{version_text}; auth status reports signed out",
+            f"{login_hint}, then verify with `{executable} {' '.join(auth_args)}`.",
+        )
+    if auth.returncode != 0:
+        return BackendProbe(
+            backend,
+            "cli",
+            True,
+            None,
+            f"{version_text}; auth status could not be determined (exit {auth.returncode})",
+            f"Run `{executable} {' '.join(auth_args)}`; if needed, {login_hint}.",
+        )
+    return BackendProbe(
+        backend,
+        "cli",
+        True,
+        None,
+        f"{version_text}; auth status output was not recognized",
+        f"Run `{executable} {' '.join(auth_args)}`; if needed, {login_hint}.",
+    )
 
 
 class EmptyCompletion(RuntimeError):

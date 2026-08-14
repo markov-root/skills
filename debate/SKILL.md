@@ -16,7 +16,7 @@ license: Apache-2.0
 compatibility: Requires Python 3.11+ and uv; the first uncached invocation needs package-index network access. Real debates require remote provider CLIs or OpenRouter credentials and may incur charges.
 metadata:
   author: markov-root
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # debate — cross-vendor multi-model debate, from the shell
@@ -52,14 +52,16 @@ single-model, in-conversation "panel" shares one set of priors, so its agreement
 
 One self-contained directory per debate under `$DEBATE_HOME` (or `--out DIR`) holds _both_ the
 inputs (`items/`, `debate.yaml`, `cast.yaml`, `materials/`, `prompts/`) and outputs
-(`runs/<run-name>/result.json`, `metrics.json`, per-call traces). The current compatibility default
-is `~/Skills/exported-data/debates`; do not assume it is private or appropriate on another machine.
+(`runs/<run-name>/result.json`, `metrics.json`, per-call traces). With neither override, the default
+is the platform user-data directory: `$XDG_DATA_HOME/debate` (or `~/.local/share/debate`) on Linux,
+`~/Library/Application Support/debate` on macOS, and `%LOCALAPPDATA%\debate` on Windows.
 
 ## The workflow
 
 ```bash
-debate panels                          # list configured panels (pick one)
-debate new  <slug> --panel <p> [--item paper.md] [--question "…"]   # scaffold ~/Skills/exported-data/debates/<slug>/
+debate doctor                          # capabilities + smallest runnable panel; NO model call
+debate panels                          # inspect all configured panels
+debate new  <slug> --panel <p> [--item paper.md] [--question "…"]
 # edit items/v0.1.0.md (the debated item) and debate.yaml (question + criteria)
 debate cost <slug>                     # DRY RUN — resolved plan/reducer + token estimate, NO spend
 debate plan <slug> --json              # exact immutable task, policy, provenance, and hashes
@@ -68,6 +70,15 @@ debate resume <slug>                   # continue a paused/crashed run from cach
 debate show <slug>/runs/<R>            # options, disagreements, gate, metrics, dropped voices
 debate status                          # every recorded debate + its stop reason
 ```
+
+`debate doctor --json` emits schema `debate.doctor` version `1.0.0`, including `backends[]`,
+`panels[]`, `smallest_runnable_panel`, `debates_home`, and `environment`; the complete contract ships
+at `assets/schemas/doctor.schema.json`. Exit `0` means at least one panel is runnable; exit `1` means
+every panel is blocked. Authentication checks make no prompt or model call, but may contact a vendor
+endpoint: probes are bounded to five seconds, and OpenRouter uses `GET /api/v1/key`. Some CLI status
+commands may also perform vendor egress. Under an air gap, firewall denial, timeout, or unrecognized
+status response, authentication is `null`/unknown and dependent panels stay blocked rather than
+being reported ready.
 
 A bare `<slug>` resolves against the debates home, so `debate run steelman-x` just works. If a run
 paused (`PAUSED` on a quota hit) or crashed, **`debate resume <slug>`** finishes it from cache — or
@@ -87,24 +98,26 @@ escape the project fail before a run directory or backend is created.
 
 - **Research exploration:** a **cross-vendor** panel can reduce shared-provider correlation, but
   agreement is still not proof or calibrated truth. Inspect the trace and residual disagreement.
-- **Dev / smoke work:** `smoke-cc` / `dev-cc` use one remote Claude CLI subscription. They avoid an
-  OpenRouter charge but are not local inference and monovendor agreement is weak evidence.
+- **Dev / smoke work:** use the smallest panel reported by `debate doctor`. `smoke-cc` uses a
+  remote Claude CLI subscription; `smoke-or` uses four inexpensive metered OpenRouter calls. One
+  voice is not a real panel, and monovendor agreement is weak evidence.
 
 Optionally give a voice a **persona** in `cast.yaml` (`persona: threat-modeller`, or inline text) —
 a domain-expert LENS that sharpens what it notices. Use expertise only, **never** a stakeholder or
 ideological persona (that injects advocacy, exactly what a steelman must avoid). Off by default.
 Backend-enforced per-voice knobs live under `call_policy`, for example
-`call_policy: {reasoning_effort: high, timeout_s: 900.0}` on a `codex_cli` voice. Do not guess:
-OpenRouter accepts per-voice `temperature`, Claude Code accepts `timeout_s`, and Codex accepts
-`timeout_s` plus `reasoning_effort`; unsupported combinations are deliberately rejected.
+`call_policy: {timeout_s: 900.0}` on a CLI voice reported by doctor. Do not guess: OpenRouter
+accepts per-voice `temperature`, Claude Code accepts `timeout_s`, and Codex accepts `timeout_s`
+plus `reasoning_effort`; unsupported combinations are deliberately rejected.
 
 ## Grounding on sources (optional)
 
 If the debate should cite a research corpus, add sources to
 `$DEBATE_HOME/<slug>/materials/manifest.yaml`, then
-`debate materials all <slug> --backend codex_cli --model gpt-5.5` to fetch + pin
-them and cache abstracts. Modes (in `debate.yaml`): `context` (inject abstracts), `disk` (CLI voices
-open files), `search` (voices search the web). During pre-alpha, fetch only trusted URLs:
+`debate materials all <slug> --backend <available-backend>` to fetch + pin them and cache abstracts.
+Choose an available backend from `debate doctor`; add `--model` only when that adapter needs an
+explicit model. Modes (in `debate.yaml`): `context` (inject abstracts), `disk` (CLI voices open
+files), `search` (voices search the web). During pre-alpha, fetch only trusted URLs:
 redirect/private-network/size hardening and prompt-injection isolation are incomplete.
 
 ## Reading the result

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from debate.backends.base import _TRANSIENT, EmptyCompletion, _client, _log, _retry
+from debate.backends.base import _TRANSIENT, BackendProbe, EmptyCompletion, _client, _log, _retry
 from debate.config import get_settings
 
 
@@ -25,6 +27,83 @@ class OpenRouterDebater:
     # loop after each call to build the run's metrics.json. The API already returns this; we
     # were discarding it. Empty until the first call.
     last_meta: dict = field(default_factory=dict)
+
+    @classmethod
+    def probe(cls) -> BackendProbe:
+        """Verify the configured key with a bounded, no-model-call OpenRouter request."""
+        api_key = get_settings().openrouter_api_key
+        if not api_key:
+            return BackendProbe(
+                cls.backend,
+                "api",
+                False,
+                False,
+                "OPENROUTER_API_KEY is not set",
+                "Set OPENROUTER_API_KEY in the process environment, then rerun `debate doctor`.",
+            )
+
+        request = Request(
+            "https://openrouter.ai/api/v1/key",
+            headers={"Authorization": f"Bearer {api_key}"},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=5) as response:
+                status = response.getcode()
+        except HTTPError as exc:
+            if exc.code in (401, 403):
+                return BackendProbe(
+                    cls.backend,
+                    "api",
+                    True,
+                    False,
+                    f"OpenRouter rejected the configured credential (HTTP {exc.code})",
+                    "Replace OPENROUTER_API_KEY, then rerun `debate doctor`.",
+                )
+            return BackendProbe(
+                cls.backend,
+                "api",
+                True,
+                None,
+                f"OpenRouter credential could not be verified (HTTP {exc.code})",
+                "Check OpenRouter availability, then rerun `debate doctor`.",
+            )
+        except (URLError, TimeoutError, OSError):
+            return BackendProbe(
+                cls.backend,
+                "api",
+                True,
+                None,
+                "OPENROUTER_API_KEY is configured but unverified (network unavailable)",
+                "Allow bounded access to openrouter.ai, then rerun `debate doctor`.",
+            )
+
+        if status == 200:
+            return BackendProbe(
+                cls.backend,
+                "api",
+                True,
+                True,
+                "OpenRouter accepted the configured credential",
+                "No action required; the probe made no model call.",
+            )
+        if status in (401, 403):
+            return BackendProbe(
+                cls.backend,
+                "api",
+                True,
+                False,
+                f"OpenRouter rejected the configured credential (HTTP {status})",
+                "Replace OPENROUTER_API_KEY, then rerun `debate doctor`.",
+            )
+        return BackendProbe(
+            cls.backend,
+            "api",
+            True,
+            None,
+            f"OpenRouter credential could not be verified (HTTP {status})",
+            "Check OpenRouter availability, then rerun `debate doctor`.",
+        )
 
     def generate(self, system: str, user: str, *, want_json: bool = False) -> str:
         s = None

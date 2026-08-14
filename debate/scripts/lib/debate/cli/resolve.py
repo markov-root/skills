@@ -8,6 +8,8 @@ import argparse
 import datetime
 import os
 import shutil
+import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from debate._resources import copy_private_tree, resource_root
@@ -19,18 +21,53 @@ def _repo_root() -> Path:
     return resource_root()
 
 
-# Default home for debate PROJECTS + their runs when neither --out nor $DEBATE_HOME is set. Repo-
-# EXTERNAL and human-browsable, so debates written by any agent from any cwd land in one shared,
-# discoverable place (`debate status`) instead of being scattered into whatever checkout was nearby
-# (Phase B decision, ADR-0008). The `debate` wrapper (~/.local/bin/debate) also exports DEBATE_HOME,
-# so this is only the last-resort compatibility fallback when the tool is invoked directly.
-_DEFAULT_DEBATE_HOME = Path.home() / "Skills" / "exported-data" / "debates"
+def _default_debate_home(
+    *,
+    platform: str | None = None,
+    os_name: str | None = None,
+    environ: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Return the platform-appropriate per-user data directory using only the stdlib."""
+    platform = sys.platform if platform is None else platform
+    os_name = os.name if os_name is None else os_name
+    environ = os.environ if environ is None else environ
+    home = Path.home() if home is None else Path(home)
+    if os_name == "nt":
+        base = (
+            Path(environ["LOCALAPPDATA"])
+            if environ.get("LOCALAPPDATA")
+            else home / "AppData" / "Local"
+        )
+        return base / "debate"
+    if platform == "darwin":
+        return home / "Library" / "Application Support" / "debate"
+    base = (
+        Path(environ["XDG_DATA_HOME"])
+        if environ.get("XDG_DATA_HOME")
+        else home / ".local" / "share"
+    )
+    return base / "debate"
+
+
+# Compatibility export for callers that imported the old constant. Resolution itself is dynamic so
+# tests and embedded callers observe current environment overrides without re-importing the module.
+_DEFAULT_DEBATE_HOME = _default_debate_home()
 
 
 def _debates_root(args: argparse.Namespace) -> Path:
-    """Where debate folders live: --out, else $DEBATE_HOME, else the default home (Phase B)."""
+    """Where debate folders live: --out, else $DEBATE_HOME, else the platform user-data home."""
     out = getattr(args, "out", None) or os.environ.get("DEBATE_HOME")
-    return Path(out).expanduser() if out else _DEFAULT_DEBATE_HOME
+    return Path(out).expanduser() if out else _default_debate_home()
+
+
+def _debates_root_source(args: argparse.Namespace) -> str:
+    """Name the precedence source that selected ``_debates_root`` for diagnostics."""
+    if getattr(args, "out", None):
+        return "--out"
+    if os.environ.get("DEBATE_HOME"):
+        return "DEBATE_HOME"
+    return "platform default"
 
 
 def _resolve_target(args: argparse.Namespace) -> str:
@@ -154,6 +191,16 @@ def _apply_materials_mode(mode: str, cast: dict, spec: dict, workspace: str | No
     return mode
 
 
+def _preflight_resolved_backends(resolved) -> None:
+    """Verify selected capabilities before any run directory or snapshot is created."""
+    from debate import backends
+
+    backends.require_backend_readiness(
+        resolved.cast,
+        include_redteam=resolved.engine_plan.has_adversary,
+    )
+
+
 def _resolve_run(args: argparse.Namespace):
     """Resolve ``debate run`` once, before creating its run directory.
 
@@ -196,6 +243,7 @@ def _resolve_run(args: argparse.Namespace):
             has_redteam=bool(cast.get("redteam") and not args.lean),
             settings=get_settings(),
         )
+        _preflight_resolved_backends(resolved)
         run_dir.mkdir(parents=True, exist_ok=True)
         # A run is SELF-CONTAINED (ADR-0006/0008): snapshot the exact cast, item, and prompts used
         # into its own dir, so the record stays honest even if the project's inputs change later.
@@ -233,6 +281,7 @@ def _resolve_run(args: argparse.Namespace):
         has_redteam=bool(cast.get("redteam") and not args.lean),
         settings=get_settings(),
     )
+    _preflight_resolved_backends(resolved)
     _snapshot_debate(folder, target, protocol, cast, args.lean)
     return folder, folder, resolved, folder.name
 

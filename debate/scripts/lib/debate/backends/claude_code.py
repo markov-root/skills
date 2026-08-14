@@ -7,8 +7,23 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 
-from debate.backends.base import _raise_cli_failure, _retry
+from debate.backends.base import BackendProbe, _probe_cli, _raise_cli_failure, _retry
 from debate.config import get_settings
+
+
+def _claude_auth_evidence(stdout: str, stderr: str) -> bool | None:
+    """Return only the explicit ``loggedIn`` boolean from Claude's JSON status."""
+    try:
+        payload = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("loggedIn") is True:
+        return True
+    if payload.get("loggedIn") is False:
+        return False
+    return None
 
 
 @dataclass
@@ -26,6 +41,19 @@ class ClaudeCodeDebater:
     # Per-call telemetry from the LAST generate() — `claude -p --output-format json` already
     # returns duration_ms / total_cost_usd / usage; we extract it instead of dropping it.
     last_meta: dict = field(default_factory=dict)
+
+    @classmethod
+    def probe(cls) -> BackendProbe:
+        """Check the executable and subscription auth without submitting a prompt."""
+        child_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        return _probe_cli(
+            backend=cls.backend,
+            executable="claude",
+            auth_args=("auth", "status"),
+            auth_evidence=_claude_auth_evidence,
+            login_hint="run `claude auth login`",
+            env=child_env,
+        )
 
     def generate(self, system: str, user: str, *, want_json: bool = False) -> str:
         timeout = self.timeout_s or get_settings().claude_code_timeout_s

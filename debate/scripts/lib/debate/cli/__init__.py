@@ -14,6 +14,7 @@ import sys
 from debate.cli.commands import (
     cmd_contract,
     cmd_cost,
+    cmd_doctor,
     cmd_eval,
     cmd_materials,
     cmd_new,
@@ -32,13 +33,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Cross-vendor multi-model expert debate (Delphi / IDEA).",
         epilog=(
             "examples:\n"
+            "  debate doctor\n"
             "  debate panels\n"
-            "  debate new  steelman-x --panel tri-cli --item paper.md --out ~/Skills/exported-data/debates\n"
-            "  debate cost ~/Skills/exported-data/debates/steelman-x           # dry-run, NO spend\n"
-            "  debate run  ~/Skills/exported-data/debates/steelman-x          # runs into runs/<panel>/\n"
-            "  debate run  ~/Skills/exported-data/debates/steelman-x --panel panel-or --run-name or  # 2nd\n"
-            "  debate status --out ~/Skills/exported-data/debates\n"
-            "  debate show  steelman-x/runs/tri-cli --out ~/Skills/exported-data/debates\n\n"
+            "  debate new steelman-x --panel <doctor-result> --item paper.md\n"
+            "  debate cost steelman-x                    # dry-run, NO spend\n"
+            "  debate run steelman-x                     # writes runs/<panel>/\n"
+            "  debate run steelman-x --panel panel-or --run-name or\n"
+            "  debate status\n"
+            "  debate show steelman-x/runs/<panel>\n\n"
             "protocols: --delphi (propose/merge a SET of options; available now) · "
             "--idea (three-point numeric estimation; next build step)\n"
             "a debate is a PROJECT dir (ADR-0008): item.md + debate.yaml + cast.yaml + materials/ "
@@ -49,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    d = sub.add_parser("doctor", help="report backend/panel readiness; makes NO model calls")
+    d.add_argument("--json", action="store_true", help="emit debate.doctor schema version 1.0.0")
+    d.add_argument("--out", help="debates root to diagnose (overrides DEBATE_HOME for this check)")
+    d.set_defaults(func=cmd_doctor)
 
     sub.add_parser("panels", help="list configured debate panels").set_defaults(func=cmd_panels)
     sub.add_parser(

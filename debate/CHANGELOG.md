@@ -2,6 +2,14 @@
 
 The project is pre-alpha; public contracts can still change before the first supported release.
 
+## 0.3.0 — 2026-08-14
+
+- Add bounded, no-model-call backend capability probes and `debate doctor` human/JSON readiness
+  reports, publish and runtime-validate their JSON Schema, and reuse the probes so `cost` and `run`
+  reject unavailable or unverified panels before persistence or calls.
+- Resolve the default debates home through platform user-data conventions while preserving `--out`
+  and `DEBATE_HOME`, and add the inexpensive OpenRouter-only `smoke-or` panel. (task: 0101)
+
 ## 0.2.0 — 2026-08-11
 
 - Resolve cost, plan, run, and resume through one immutable `ResolvedRunPlan`, atomically record it
