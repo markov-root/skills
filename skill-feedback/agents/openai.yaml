@@ -1,0 +1,7 @@
+interface:
+  display_name: "Skill Feedback"
+  short_description: "Record skill outcomes, praise, and friction"
+  default_prompt: "Use $skill-feedback to record or review evidence-backed feedback for a skill."
+
+policy:
+  allow_implicit_invocation: true

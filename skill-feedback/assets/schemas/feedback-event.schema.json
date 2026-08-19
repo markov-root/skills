@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://home.lab/schemas/skill-feedback/event-v2.json",
+  "title": "Skill Feedback Event v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "skill",
+    "invocation_id",
+    "session",
+    "actor",
+    "source",
+    "task",
+    "tags",
+    "privacy",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt-[A-Za-z0-9-]+$"
+    },
+    "event_type": {
+      "enum": [
+        "invocation.started",
+        "invocation.finished",
+        "observation.recorded",
+        "disposition.changed"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "skill": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "invocation_id": {
+      "type": ["string", "null"]
+    },
+    "session": {
+      "type": "object",
+      "required": ["id", "harness"],
+      "properties": {
+        "id": {
+          "type": ["string", "null"]
+        },
+        "harness": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "actor": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "enum": ["agent", "user", "automation", "system"]
+        },
+        "id": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "enum": [
+        "explicit_user",
+        "observed_user",
+        "deterministic",
+        "independent_evaluation",
+        "agent_judgment",
+        "automation"
+      ]
+    },
+    "task": {
+      "type": "object",
+      "required": ["class"],
+      "properties": {
+        "class": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "privacy": {
+      "type": "object",
+      "required": ["content_included", "redacted"],
+      "properties": {
+        "content_included": {
+          "const": false
+        },
+        "redacted": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "invocation.started"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "invocation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payload": {
+            "$ref": "#/$defs/invocationStarted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "invocation.finished"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "invocation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payload": {
+            "$ref": "#/$defs/invocationFinished"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "observation.recorded"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/observationRecorded"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "disposition.changed"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/dispositionChanged"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "backend": {
+      "type": "object",
+      "required": ["router", "provider", "model", "effort"],
+      "properties": {
+        "router": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "provider": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "model": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "effort": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "invocationStarted": {
+      "type": "object",
+      "required": ["feature", "backend"],
+      "properties": {
+        "feature": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "backend": {
+          "$ref": "#/$defs/backend"
+        }
+      },
+      "additionalProperties": false
+    },
+    "invocationFinished": {
+      "type": "object",
+      "required": ["outcome", "backend", "metrics", "evidence"],
+      "properties": {
+        "outcome": {
+          "enum": ["success", "partial", "failure", "abandoned", "unknown"]
+        },
+        "backend": {
+          "$ref": "#/$defs/backend"
+        },
+        "metrics": {
+          "type": "object",
+          "required": [
+            "duration_ms",
+            "cost_usd",
+            "input_tokens",
+            "output_tokens",
+            "retries"
+          ],
+          "properties": {
+            "duration_ms": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "cost_usd": {
+              "type": ["number", "null"],
+              "minimum": 0
+            },
+            "input_tokens": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "output_tokens": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "retries": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      },
+      "additionalProperties": false
+    },
+    "observationRecorded": {
+      "type": "object",
+      "required": [
+        "feedback_id",
+        "kind",
+        "signal",
+        "feature",
+        "impact",
+        "outcome",
+        "evidence",
+        "note_sha256",
+        "note_file"
+      ],
+      "properties": {
+        "feedback_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["wish", "friction", "bug", "praise", "idea"]
+        },
+        "signal": {
+          "enum": ["positive", "negative", "mixed"]
+        },
+        "feature": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "impact": {
+          "enum": ["low", "medium", "high", "unknown"]
+        },
+        "outcome": {
+          "enum": ["success", "partial", "failure", "abandoned", "unknown"]
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "note_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "note_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delivery": {
+          "enum": ["source", "pending"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "dispositionChanged": {
+      "type": "object",
+      "required": ["feedback_id", "status", "rationale_sha256", "links"],
+      "properties": {
+        "feedback_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "open",
+            "observed",
+            "preserve",
+            "planned",
+            "resolved",
+            "declined",
+            "duplicate"
+          ]
+        },
+        "rationale_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "links": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string"
+            },
+            "test": {
+              "type": "string"
+            },
+            "duplicate_of": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Elicit"
+  short_description: "Grill for requirements before acting; re-verify on evidence; ask forward-looking questions"
+  default_prompt: "Use $elicit to pin down what I actually want before you build it."
+
+policy:
+  allow_implicit_invocation: true

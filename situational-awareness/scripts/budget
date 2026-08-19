@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# budget — fused context + quota view (task 0007). One call, one binding action.
+# stdlib-only ⇒ no venv needed at runtime. Package lives beside this script.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m situational_awareness.budget "$@"

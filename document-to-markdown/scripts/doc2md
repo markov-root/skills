@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Relocatable agent-facing launcher for the bundled doc2md runtime.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! command -v uv >/dev/null 2>&1; then
+  echo "error: doc2md requires uv; install uv, then retry" >&2
+  exit 127
+fi
+
+# Where converted run bundles (result.json, document.md, raw/, attempts/) are written.
+export DOC2MD_HOME="${DOC2MD_HOME:-$HOME/.local/share/doc2md}"
+exec uv run --script "$SCRIPT_DIR/doc2md_cli.py" "$@"

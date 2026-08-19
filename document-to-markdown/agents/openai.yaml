@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document to Markdown"
+  short_description: "Convert documents and web pages to clean Markdown"
+  default_prompt: "Use $document-to-markdown to convert this document or URL into clean, provenance-rich Markdown."

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# context-check — thin wrapper so agents/hooks can call the tool by a stable name.
+# stdlib-only ⇒ no venv needed at runtime (fast; safe to run every turn from a hook).
+# The package is bundled beside this script in the installed skill, so it works from
+# a relocated/symlinked copy.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m situational_awareness "$@"

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://home.lab/schemas/skill-feedback/privacy-config-v3.json",
+  "title": "Skill Feedback Privacy Configuration v3",
+  "type": "object",
+  "required": [
+    "version",
+    "automatic_collection",
+    "content_capture",
+    "retention",
+    "session_identifiers",
+    "note_locations"
+  ],
+  "properties": {
+    "version": {
+      "const": 3
+    },
+    "automatic_collection": {
+      "enum": ["off", "manifest_opt_in"]
+    },
+    "content_capture": {
+      "const": false
+    },
+    "retention": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["mode", "days"],
+          "properties": {
+            "mode": {
+              "enum": ["unset", "forever"]
+            },
+            "days": {
+              "type": "null"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["mode", "days"],
+          "properties": {
+            "mode": {
+              "const": "days"
+            },
+            "days": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "session_identifiers": {
+      "const": "hmac-sha256"
+    },
+    "note_locations": {
+      "const": "skill-relative"
+    }
+  },
+  "additionalProperties": false
+}

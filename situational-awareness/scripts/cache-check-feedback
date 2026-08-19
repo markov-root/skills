@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+# skill-feedback-managed-wrapper: v1
+# metadata: {"feature":"cache-check","schema":1,"skill":"situational-awareness","success_exit_codes":[10,11],"target":"cache-check"}
+"""Generated adapter. Reconcile with `skill-feedback wrapper --apply`."""
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+_SKILL = 'situational-awareness'
+_FEATURE = 'cache-check'
+_SUCCESS_EXIT_CODES = (10, 11)
+_TARGET = (Path(__file__).resolve().parent / 'cache-check').resolve()
+_COMMAND = [str(_TARGET), *sys.argv[1:]]
+_RUN_OPTIONS = [
+    item
+    for code in _SUCCESS_EXIT_CODES
+    for item in ("--success-exit-code", str(code))
+]
+_FEEDBACK = shutil.which("skill-feedback")
+if _FEEDBACK is None or Path(_FEEDBACK).resolve() == Path(__file__).resolve():
+    os.execv(str(_TARGET), _COMMAND)
+os.execv(
+    _FEEDBACK,
+    [
+        _FEEDBACK,
+        "run",
+        _SKILL,
+        "--feature",
+        _FEATURE,
+        *_RUN_OPTIONS,
+        "--",
+        *_COMMAND,
+    ],
+)

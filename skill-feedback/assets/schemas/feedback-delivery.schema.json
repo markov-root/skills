@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://home.lab/schemas/skill-feedback/delivery-v1.json",
+  "title": "Skill Feedback Delivery Dispositions v1",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "required": [
+      "from",
+      "to",
+      "entry_sha256",
+      "note_sha256",
+      "delivered_at"
+    ],
+    "properties": {
+      "from": {
+        "type": "string",
+        "pattern": "^note-outbox/[^/]+/docs/feedback/[^/]+\\.md$"
+      },
+      "to": {
+        "type": "string",
+        "pattern": "^docs/feedback/[^/]+\\.md$"
+      },
+      "entry_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "note_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "delivered_at": {
+        "type": "string",
+        "format": "date-time"
+      }
+    },
+    "additionalProperties": false
+  }
+}
