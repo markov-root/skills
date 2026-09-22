@@ -10,12 +10,13 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
+from ..policy.document_paths import DocumentContainment, DocumentContainmentError
 from ..policy.manifest import TaskInventoryPolicy, TaskPlanningPolicy
 
 SCHEMA_VERSION = 1
 MAX_DOCUMENT_BYTES = 1_000_000
 MAX_DOCUMENTS = 2_000
-KNOWN_STATUSES = {"todo", "partial", "blocked", "done"}
+KNOWN_STATUSES = {"todo", "in_progress", "partial", "blocked", "done"}
 _STATUS = re.compile(r"^\s*[-*]?\s*Status\s*:\s*(.+?)\s*$", re.IGNORECASE)
 _DEPENDS = re.compile(r"^\s*[-*]?\s*Depends\s+on\s*:\s*(.+?)\s*$", re.IGNORECASE)
 _PLANNING = re.compile(r"^\s*[-*]\s+X-Planning\s*:\s*(.*?)\s*$", re.IGNORECASE)
@@ -24,6 +25,7 @@ _BULLET = re.compile(r"^\s*[-*+]\s+(?:\[([ xX])\]\s+)?(.+?)\s*$")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _TASK_ID = re.compile(r"(?<!\d)(\d{4})(?!\d)")
 _RANGE = re.compile(r"(?<!\d)(\d{4})\s*[–-]\s*(\d{4})(?!\d)")
+_OPEN_CLARIFICATION = re.compile(r"\[\s*NEEDS\s+CLARIFICATION(?:\s*:[^\]]*)?\s*\]", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,9 @@ class TaskRecord:
     status_explicit: bool
     dependencies: tuple[str, ...]
     dependency_text: str | None
+    scheduling_dependencies: tuple[str, ...]
+    parent: str | None
+    open_clarification: bool
     acceptance: tuple[Criterion, ...]
     evidence: tuple[Criterion, ...]
     links: tuple[DocumentLink, ...]
@@ -80,6 +85,7 @@ class TaskRecord:
     format: str
     provenance: Provenance
     planning: dict[str, PlanningValue]
+    details: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -96,24 +102,30 @@ class HandoffRecord:
 def inventory(
     root: Path,
     policy: TaskInventoryPolicy | None = None,
+    *,
+    docs_root: Path | None = None,
+    include_graph_metadata: bool = False,
 ) -> dict[str, Any]:
     """Inventory task/handoff Markdown without mutating or inferring project state."""
     root = root.resolve()
+    containment = (
+        None if docs_root is None else DocumentContainment.for_project_docs(root, docs_root)
+    )
     policy = policy or TaskInventoryPolicy()
     findings: list[InventoryFinding] = []
     task_paths = tuple(
         path
-        for path in _expand(root, policy.include, findings, "task")
+        for path in _expand(root, policy.include, findings, "task", containment=containment)
         if path.stem.lower() not in {"readme", "index"}
     )
     handoff_paths = tuple(
         path
-        for path in _expand(root, policy.handoffs, findings, "handoff")
+        for path in _expand(root, policy.handoffs, findings, "handoff", containment=containment)
         if path.stem.lower() not in {"readme", "index"}
     )
     decision_paths = tuple(
         path
-        for path in _expand(root, policy.decisions, findings, "decision")
+        for path in _expand(root, policy.decisions, findings, "decision", containment=containment)
         if path.stem.lower() not in {"readme", "index"}
     )
     decision_ids = {
@@ -169,7 +181,9 @@ def inventory(
         "root": str(root),
         "sources": sources,
         "summary": summary,
-        "tasks": [_task_json(item) for item in tasks],
+        "tasks": [
+            _task_json(item, include_graph_metadata=include_graph_metadata) for item in tasks
+        ],
         "handoffs": [_jsonable(asdict(item)) for item in handoffs],
         "findings": [_jsonable(asdict(item)) for item in sorted(findings, key=_finding_key)],
     }
@@ -296,6 +310,9 @@ def _parse_task(
     status, status_explicit, status_line = _status(lines, frontmatter)
     dependency_text, _dependency_line = _dependency_text(lines, frontmatter)
     dependencies = _dependency_ids(dependency_text or "")
+    scheduling_dependencies = _scheduling_dependency_ids(frontmatter)
+    parent = _parent_id(frontmatter)
+    open_clarification = _OPEN_CLARIFICATION.search(text) is not None
     sections = _sections(lines)
     acceptance = _section_criteria(lines, sections, {"done when", "acceptance criteria"}, relative)
     evidence = _section_criteria(lines, sections, {"evidence", "verification"}, relative)
@@ -321,6 +338,7 @@ def _parse_task(
     )
     if not planning_valid:
         extraction = "partial"
+    details = _task_ordering_details(frontmatter)
     if not status_explicit:
         findings.append(
             InventoryFinding(
@@ -383,6 +401,9 @@ def _parse_task(
         status_explicit=status_explicit,
         dependencies=dependencies,
         dependency_text=dependency_text,
+        scheduling_dependencies=scheduling_dependencies,
+        parent=parent,
+        open_clarification=open_clarification,
         acceptance=acceptance,
         evidence=evidence,
         links=links,
@@ -390,6 +411,7 @@ def _parse_task(
         format=format_name,
         provenance=Provenance(relative, title_line),
         planning=planning,
+        details=details,
     )
 
 
@@ -487,10 +509,30 @@ def _expand(
     patterns: tuple[str, ...],
     findings: list[InventoryFinding],
     kind: str,
+    *,
+    containment: DocumentContainment | None = None,
 ) -> tuple[Path, ...]:
     found: set[Path] = set()
     for pattern in patterns:
-        for candidate in root.glob(pattern):
+        if containment is not None:
+            try:
+                candidates = containment.expand_project_glob(
+                    pattern,
+                    purpose=f"{kind} source",
+                )
+            except (DocumentContainmentError, OSError) as exc:
+                findings.append(
+                    InventoryFinding(
+                        "source.outside-root",
+                        "error",
+                        str(exc),
+                        Provenance(pattern, 1),
+                    )
+                )
+                continue
+        else:
+            candidates = root.glob(pattern)
+        for candidate in candidates:
             if not candidate.is_file():
                 continue
             try:
@@ -590,6 +632,14 @@ def _projection_summary(
 
 
 def _dependency_text(lines: list[str], frontmatter: dict[str, Any]) -> tuple[str | None, int]:
+    details = _task_details(frontmatter)
+    declared_details = details.get("depends_on")
+    if isinstance(declared_details, list):
+        return ", ".join(str(item) for item in declared_details), _mapping_line(
+            lines, "depends_on", 1
+        )
+    if isinstance(declared_details, (str, int)):
+        return str(declared_details), _mapping_line(lines, "depends_on", 1)
     relationships = _typed_metadata(frontmatter).get("relationships")
     if isinstance(relationships, list):
         targets = [
@@ -611,6 +661,37 @@ def _dependency_text(lines: list[str], frontmatter: dict[str, Any]) -> tuple[str
         if match := _DEPENDS.match(line):
             return match.group(1).strip(), index + 1
     return None, 1
+
+
+def _parent_id(frontmatter: dict[str, Any]) -> str | None:
+    declared = _task_details(frontmatter).get("parent", frontmatter.get("parent"))
+    if not isinstance(declared, (str, int)) or not str(declared).strip():
+        return None
+    references = _dependency_ids(str(declared))
+    return references[0] if references else str(declared).removeprefix("task:").strip()
+
+
+def _scheduling_dependency_ids(frontmatter: dict[str, Any]) -> tuple[str, ...]:
+    declared = _task_details(frontmatter).get("depends_on", frontmatter.get("depends_on"))
+    if isinstance(declared, list):
+        return _dependency_ids(", ".join(str(item) for item in declared))
+    if isinstance(declared, (str, int)):
+        return _dependency_ids(str(declared))
+    return ()
+
+
+def _task_details(frontmatter: dict[str, Any]) -> dict[str, Any]:
+    details = _typed_metadata(frontmatter).get("details")
+    return details if isinstance(details, dict) else {}
+
+
+def _task_ordering_details(frontmatter: dict[str, Any]) -> dict[str, str]:
+    details = _task_details(frontmatter)
+    return {
+        field: value
+        for field in ("priority", "size")
+        if isinstance((value := details.get(field)), str) and value
+    }
 
 
 def _typed_metadata(frontmatter: dict[str, Any]) -> dict[str, Any]:
@@ -858,7 +939,10 @@ def _sections(lines: list[str]) -> dict[str, tuple[int, int]]:
         if match := _HEADING.match(line):
             headings.append((match.group(2).strip().lower(), index + 1))
     return {
-        heading: (start, headings[index + 1][1] - 1 if index + 1 < len(headings) else len(lines))
+        heading: (
+            start,
+            headings[index + 1][1] - 1 if index + 1 < len(headings) else len(lines),
+        )
         for index, (heading, start) in enumerate(headings)
     }
 
@@ -952,8 +1036,14 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _task_json(item: TaskRecord) -> dict[str, Any]:
+def _task_json(item: TaskRecord, *, include_graph_metadata: bool = False) -> dict[str, Any]:
     value = asdict(item)
+    if not include_graph_metadata:
+        value.pop("scheduling_dependencies")
+        value.pop("parent")
+        value.pop("open_clarification")
     if not value["planning"]:
         value.pop("planning")
+    if not value["details"]:
+        value.pop("details")
     return _jsonable(value)

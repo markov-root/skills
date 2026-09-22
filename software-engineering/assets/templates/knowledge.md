@@ -15,6 +15,13 @@ superseded_by: ""
 
 # Knowledge: TITLE
 
+<!-- Quality bar — write to the Knowledge content standard
+the software-engineering skill knowledge file knowledge/documentation-living-content-standards.md (section #knowledge):
+reusable vocabulary, trade-offs, and explanatory synthesis the reader cannot get from code alone ·
+durable within declared limits · not silently binding policy. Discriminating test: does it help a
+routed reader reason about the system without acting as a specification or standard? Delete this
+comment once the knowledge is written. -->
+
 ## Purpose
 
 What this knowledge covers and when an agent should load it. Replace the title placeholder.

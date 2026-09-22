@@ -318,6 +318,19 @@ Stop for the current decision when:
 Do not stop merely because coverage reached a number, every function has a test, snapshots were
 updated, CI is green, or no sampled input failed.
 
+**Application evidence, not invocation evidence.** When a routed practice is applied, its evidence
+is the artifact the practice produces for this change — a negative test on a relevant failure path,
+a consumer-side trace, a boundary or compatibility check, a measured budget — not the fact that a
+file was read or a tool was called. Read counts and invocation logs prove exposure, not
+application. Conversely, a genuinely mechanical change with no accumulated risk applies its
+routine checks and stops there: manufacturing practice reports for work that needed none is
+ceremony, and listing a practice as **not applicable** with the excluding task fact is as correct
+as applying it. Dispositions attach to scope: a partially applied practice states what its
+evidence covers and what does not; **unavailable** names a genuinely missing prerequisite or
+capability — work that is merely unassessed is recorded as unassessed with an explicit deferral,
+not dressed as a disposition — and an exception is **bypassed** only with named authorization.
+None of these may be folded into "applied" or into silence.
+
 ## Meta-Question
 
 What exact claim does this test result support for this subject, scenario/input process, oracle, and

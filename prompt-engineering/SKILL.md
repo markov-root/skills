@@ -16,7 +16,7 @@ license: Apache-2.0
 compatibility: Requires Python 3.10+; agents-link additionally requires a POSIX shell.
 metadata:
   author: markov-root
-  version: "0.1.2"
+  version: "0.2.0"
 ---
 
 # prompt-engineering — write the prompt like an engineer, not a wordsmith
@@ -83,6 +83,7 @@ that concern. A capability delegation ends this skill's routing—do not duplica
 | -------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `agent_system`             | System prompts, AGENTS.md/CLAUDE.md, personas, single-agent instructions             | `knowledge/context-engineering.md`, `knowledge/structure.md`                  | `knowledge/model-era.md`, `knowledge/checklist.md`              |
 | `agentic_tools`            | Tool descriptions/policy, delegation, handoffs, subagents, multi-agent orchestration | `knowledge/agentic-tools.md`, `knowledge/agentic-contracts.md`                | context, structured-output, and judge modules as needed         |
+| `prompt_security`          | Prompt injection, jailbreaks, tool-output poisoning, exfiltration controls           | `knowledge/prompt-security.md`                                                | context, agentic-tools, RAG, structured-output, checklist       |
 | `llm_judge`                | LLM judges, graders, scoring rubrics                                                 | `knowledge/llm-as-judge.md`, `knowledge/checklist.md`                         | technique, anti-pattern, and model-era modules as needed        |
 | `prompt_evaluation`        | Prompt eval sets, A/B tests, optimizers, release gates, model-upgrade regression     | `knowledge/prompt-evaluation.md`, `knowledge/prompt-eval-templates.md`        | judge, checklist, and model-era modules as needed               |
 | `vision_understanding`     | Image/screenshot analysis, OCR, visual tables, document QA, bounding boxes           | `knowledge/vision-understanding.md`, `knowledge/vision-templates.md`          | structured-output, RAG, and checklist modules as needed         |

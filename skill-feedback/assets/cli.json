@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "commands": {
+    "skill-feedback": {
+      "runner": "exec",
+      "path": "scripts/skill-feedback"
+    }
+  }
+}

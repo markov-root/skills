@@ -21,8 +21,9 @@
   ],
   "properties": {
     "version": { "const": 1 },
+    "contract_tier": { "enum": ["core", "full"] },
     "role": {
-      "enum": ["task", "adr", "audit", "research", "lesson", "handoff"]
+      "enum": ["task", "adr", "audit", "research", "lesson", "handoff", "plan"]
     },
     "id": {
       "type": "string",
@@ -63,7 +64,14 @@
         "properties": {
           "uid": { "pattern": "^task-" },
           "state": {
-            "enum": ["todo", "partial", "blocked", "done", "superseded"]
+            "enum": [
+              "todo",
+              "in_progress",
+              "partial",
+              "blocked",
+              "done",
+              "superseded"
+            ]
           },
           "authority": {
             "properties": { "kind": { "const": "work-state" } }
@@ -152,13 +160,28 @@
           "details": { "$ref": "#/$defs/handoff_details" }
         }
       }
+    },
+    {
+      "if": { "properties": { "role": { "const": "plan" } } },
+      "then": {
+        "properties": {
+          "uid": { "pattern": "^plan-" },
+          "state": {
+            "enum": ["active", "complete", "abandoned", "superseded"]
+          },
+          "authority": {
+            "properties": { "kind": { "const": "execution-plan" } }
+          },
+          "details": { "$ref": "#/$defs/plan_details" }
+        }
+      }
     }
   ],
   "$defs": {
     "nonempty": { "type": "string", "minLength": 1 },
     "uid": {
       "type": "string",
-      "pattern": "^(task|adr|audit|research|lesson|handoff)-[0-9]{8}T[0-9]{12}Z-[0-9a-f]{8}$"
+      "pattern": "^(task|adr|audit|research|lesson|handoff|plan)-[0-9]{8}T[0-9]{12}Z-[0-9a-f]{8}$"
     },
     "nonempty_strings": {
       "type": "array",
@@ -188,6 +211,15 @@
       },
       "uniqueItems": true
     },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "task_ids": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/task_id" },
+      "uniqueItems": true
+    },
     "authority": {
       "type": "object",
       "additionalProperties": false,
@@ -200,7 +232,8 @@
             "point-in-time-evidence",
             "research-record",
             "reusable-inference",
-            "continuation-state"
+            "continuation-state",
+            "execution-plan"
           ]
         },
         "owner": { "$ref": "#/$defs/nonempty" },
@@ -258,7 +291,22 @@
       "required": ["criteria"],
       "properties": {
         "criteria": { "$ref": "#/$defs/criterion_references" },
-        "blocker": { "$ref": "#/$defs/nonempty" }
+        "blocker": { "$ref": "#/$defs/nonempty" },
+        "depends_on": { "$ref": "#/$defs/task_ids" },
+        "parent": { "$ref": "#/$defs/task_id" },
+        "touches": { "$ref": "#/$defs/strings" },
+        "size": { "enum": ["xs", "s", "m", "l"] },
+        "priority": { "enum": ["p0", "p1", "p2"] },
+        "atomic_large": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rationale", "rollback", "checkpoints"],
+          "properties": {
+            "rationale": { "$ref": "#/$defs/nonempty" },
+            "rollback": { "$ref": "#/$defs/nonempty" },
+            "checkpoints": { "$ref": "#/$defs/nonempty_strings" }
+          }
+        }
       }
     },
     "adr_details": {
@@ -326,6 +374,15 @@
         "blockers": { "$ref": "#/$defs/strings" },
         "authority_refs": { "$ref": "#/$defs/nonempty_strings" },
         "resume": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "plan_details": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective"],
+      "properties": {
+        "objective": { "$ref": "#/$defs/nonempty" },
+        "started": { "type": "string", "format": "date" }
       }
     }
   }

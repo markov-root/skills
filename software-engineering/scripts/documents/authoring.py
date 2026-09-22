@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..policy.document_paths import DocumentContainment
 from ..policy.manifest import DocsCurrencyPolicy, DocumentRolePolicy
 from ..policy.path_matching import matches_any
 from ..resources import template_path
@@ -27,6 +28,7 @@ _ROLE_LABELS = {
     "audit": "Audit",
     "research": "Research",
     "handoff": "Handoff",
+    "plan": "Plan",
     "specification": "Specification",
     "knowledge": "Knowledge",
     "reference": "Reference",
@@ -60,11 +62,13 @@ def allocate_document(
     title: str | None = None,
     now: datetime | None = None,
     random_hex: str | None = None,
+    docs_root: Path | None = None,
 ) -> DocumentAllocation:
     """Create exactly one fully rendered role template without overwriting a path."""
     root = root.resolve()
+    containment = _project_containment(root, docs_root)
     declaration = _declaration(policy, role)
-    _allocation_directory(root, declaration)
+    _allocation_directory(root, declaration, containment=containment)
     moment = (now or datetime.now(UTC)).astimezone(UTC)
     selected_title = (title or f"New {_ROLE_LABELS[role]}").strip()
     if not selected_title:
@@ -79,7 +83,7 @@ def allocate_document(
         )
     template = _template(role)
 
-    next_number = _next_number(root, declaration)
+    next_number = _next_number(root, declaration, containment=containment)
     limit = (10**declaration.id_prefix_digits) - 1
     for offset in range(MAX_ALLOCATION_ATTEMPTS):
         number = next_number + offset
@@ -95,6 +99,12 @@ def allocate_document(
                 f"allocator path {relative!r} is not selected by role {role!r} include patterns"
             )
         target = root / relative
+        if containment is not None:
+            target = containment.require_project_path(
+                target,
+                purpose=f"{role} allocation target",
+                must_exist=False,
+            )
         uid = f"{role}-{moment:%Y%m%dT%H%M%S%fZ}-{suffix}"
         rendered = _render(template, role, document_id, uid, selected_title, moment)
         try:
@@ -129,8 +139,21 @@ def _declaration(
     return matching[0]
 
 
-def _allocation_directory(root: Path, declaration: DocumentRolePolicy) -> Path:
+def _allocation_directory(
+    root: Path,
+    declaration: DocumentRolePolicy,
+    *,
+    containment: DocumentContainment | None = None,
+) -> Path:
     directory = (root / declaration.index).parent
+    if containment is not None:
+        resolved = containment.require_project_path(
+            directory,
+            purpose=f"{declaration.name} allocation directory",
+        )
+        if not resolved.is_dir():
+            raise ValueError(f"role {declaration.name!r} allocation directory does not exist")
+        return resolved
     try:
         resolved = directory.resolve()
         resolved.relative_to(root)
@@ -143,13 +166,26 @@ def _allocation_directory(root: Path, declaration: DocumentRolePolicy) -> Path:
     return resolved
 
 
-def _next_number(root: Path, declaration: DocumentRolePolicy) -> int:
+def _next_number(
+    root: Path,
+    declaration: DocumentRolePolicy,
+    *,
+    containment: DocumentContainment | None = None,
+) -> int:
     numbers: list[int] = []
     selected: set[Path] = set()
     for pattern in declaration.include:
         if pattern.startswith("!"):
             continue
-        for path in root.glob(pattern):
+        paths = (
+            containment.expand_project_glob(
+                pattern,
+                purpose=f"{declaration.name} allocator scan",
+            )
+            if containment is not None
+            else root.glob(pattern)
+        )
+        for path in paths:
             if not path.is_file():
                 continue
             relative = path.relative_to(root).as_posix()
@@ -162,6 +198,15 @@ def _next_number(root: Path, declaration: DocumentRolePolicy) -> int:
         if len(prefix) == declaration.id_prefix_digits and prefix.isdigit():
             numbers.append(int(prefix))
     return max(numbers, default=0) + 1
+
+
+def _project_containment(
+    root: Path,
+    docs_root: Path | None,
+) -> DocumentContainment | None:
+    if docs_root is None:
+        return None
+    return DocumentContainment.for_project_docs(root, docs_root)
 
 
 def _template(role: str) -> str:

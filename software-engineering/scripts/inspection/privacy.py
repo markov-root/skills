@@ -320,7 +320,7 @@ def run_privacy(root: Path, *, target: str) -> tuple[InspectionLayer, Inspection
     import time
 
     started = time.monotonic()
-    git_available = is_git_work_tree(root)
+    git_available = _root_owns_git_history(root)
     paths, file_list_truncated = _list_candidate_files(root, git_available)
     findings, media = current_privacy_findings(root, paths, target=target)
     current_truncated = len(findings) >= MAX_FINDINGS
@@ -373,3 +373,20 @@ def run_privacy(root: Path, *, target: str) -> tuple[InspectionLayer, Inspection
         ),
     )
     return content, run_media_metadata(root, media)
+
+
+def _root_owns_git_history(root: Path) -> bool:
+    """Do not let an exact nested traversal root inherit enclosing Git history."""
+
+    if not is_git_work_tree(root):
+        return False
+    result = run_process(
+        ("git", "-C", str(root), "rev-parse", "--show-toplevel"),
+        root=root,
+        timeout_seconds=10,
+        max_output_bytes=16_384,
+    )
+    if result.status != "passed":
+        return False
+    reported = result.stdout.decode(errors="replace").strip()
+    return bool(reported) and Path(reported).resolve() == root.resolve()

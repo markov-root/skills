@@ -66,7 +66,7 @@ def parse_gitleaks(
 
 def run_gitleaks(root: Path) -> InspectionLayer:
     started = time.monotonic()
-    git_history = is_git_work_tree(root)
+    git_history = _root_owns_git_history(root)
     scope = ("git-history", "current-directory") if git_history else ("current-directory",)
     tool = tool_evidence("gitleaks", ("gitleaks", "version"), network="none", root=root)
     if tool.executable is None:
@@ -145,3 +145,20 @@ def run_gitleaks(root: Path) -> InspectionLayer:
             "No credential verification or network validation was performed.",
         ),
     )
+
+
+def _root_owns_git_history(root: Path) -> bool:
+    """Use history only when the traversal root is the repository boundary itself."""
+
+    if not is_git_work_tree(root):
+        return False
+    result = run_process(
+        ("git", "-C", str(root), "rev-parse", "--show-toplevel"),
+        root=root,
+        timeout_seconds=10,
+        max_output_bytes=16_384,
+    )
+    if result.status != "passed":
+        return False
+    reported = result.stdout.decode(errors="replace").strip()
+    return bool(reported) and Path(reported).resolve() == root.resolve()

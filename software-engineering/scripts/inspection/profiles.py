@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from ..policy.project_root import resolve_explicit_project_root
 from ..project.discovery import discover_observation_root
 from .dependencies import reconcile_dependency_evidence
 from .dependency_imports import import_dependency_layers
@@ -23,9 +24,22 @@ def run_active_inspection(
     target: str,
     offline: bool,
     dependency_evidence_paths: Sequence[str | Path] = (),
+    exact_root: bool = False,
 ) -> dict[str, Any]:
-    observed = discover_observation_root(start)
-    root = observed.root.resolve()
+    if exact_root:
+        resolution = resolve_explicit_project_root(start)
+        root = resolution.root
+        root_resolution = resolution.to_dict()
+    else:
+        observed = discover_observation_root(start)
+        root = observed.root.resolve()
+        root_resolution = {
+            "requested": str(observed.requested or observed.root),
+            "resolved": str(observed.root),
+            "promoted": observed.promoted,
+            "requested_has_manifest": observed.requested_manifest,
+            "strategy": "discovered",
+        }
     selected = set(profiles)
     if "publication" in selected:
         selected.update(("security", "privacy"))
@@ -52,7 +66,8 @@ def run_active_inspection(
     status = "unavailable" if required_unavailable else ("failed" if failed else "passed")
     return {
         "schema_version": 1,
-        "root": ".",
+        "root": str(root),
+        "root_resolution": root_resolution,
         "mode": "active",
         "profiles": sorted(set(profiles)),
         "expanded_domains": sorted({layer.domain for layer in layers}),
@@ -77,7 +92,7 @@ def run_active_inspection(
                 item
                 for item in (
                     (
-                        "secret patterns in Git history and the current directory"
+                        "secret patterns in the exact traversal root; Git history only when that root is the Git boundary"
                         if "security" in selected
                         else None
                     ),
@@ -87,7 +102,7 @@ def run_active_inspection(
                         else None
                     ),
                     (
-                        "privacy candidates in current text, Git patch history, and Git identity"
+                        "privacy candidates in exact-root text; Git history and identity only when that root is the Git boundary"
                         if "privacy" in selected
                         else None
                     ),

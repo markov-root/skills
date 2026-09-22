@@ -13,6 +13,7 @@ supersedes: ""
 superseded_by: ""
 engineering_document:
   version: 1
+  contract_tier: full
   role: handoff
   id: "NNNN"
   uid: handoff-YYYYMMDDTHHMMSSffffffZ-RANDOM8
@@ -40,6 +41,18 @@ engineering_document:
 ---
 
 # Handoff NNNN: Continuation checkpoint
+
+<!-- Quality bar — write to the Handoff content standard
+the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #handoff):
+continuation state for one work boundary · first action resolves from current state and is safe ·
+done/next/blocked separated with owners and done-when conditions · evidence pointers resolve to live
+authority. Discriminating test: can a cold reader take the first correct evidence-aware action
+without interviewing anyone or selecting stale authority? Exactly one current handoff per scope.
+Audience and lifecycle judgment: a handoff is continuation state, often operational — decide its
+boundary deliberately rather than assuming it must never leave the current space. Ephemeral
+session detail stays proportional; load-bearing facts a successor needs stay stated. If a broader
+audience later needs it, a correctly scoped counterpart is written, not a silent republish.
+Delete this comment once the handoff is written. -->
 
 ## Outcome
 

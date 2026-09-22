@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .lifecycle import FinishRecord, StartRecord
 
 
-def render_start(record: StartRecord) -> str:
+def render_start(record: StartRecord, root: Path | None = None) -> str:
     selected = sum(item.selected for item in record.checks)
     failed = sum(
         item.baseline_status in {"failed", "timed_out", "unavailable"} for item in record.checks
@@ -15,6 +17,7 @@ def render_start(record: StartRecord) -> str:
         [
             "# Engineering run started",
             "",
+            *((f"- Traversal root: `{root}`",) if root is not None else ()),
             f"- Run ID: `{record.run_id}`",
             f"- Intent: {record.intent}",
             f"- Baseline checks: {selected} selected · {failed} failed/unavailable",
@@ -25,10 +28,11 @@ def render_start(record: StartRecord) -> str:
     )
 
 
-def render_finish(record: FinishRecord) -> str:
+def render_finish(record: FinishRecord, root: Path | None = None) -> str:
     lines = [
         "# Engineering finish evidence",
         "",
+        *((f"- Traversal root: `{root}`",) if root is not None else ()),
         f"- Run ID: `{record.run_id}`",
         f"- Checks executed: {sum(item.selected for item in record.check_plans)}",
         f"- Outstanding approvals: {', '.join(record.approvals_required) or 'none'}",

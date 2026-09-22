@@ -13,6 +13,7 @@ supersedes: ""
 superseded_by: ""
 engineering_document:
   version: 1
+  contract_tier: full
   role: adr
   id: "NNNN"
   uid: adr-YYYYMMDDTHHMMSSffffffZ-RANDOM8
@@ -33,6 +34,18 @@ engineering_document:
 ---
 
 # ADR NNNN: Decision
+
+<!-- Quality bar — write to the ADR content standard
+the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #adr):
+one architecturally significant decision, named decider and authority · contestable premise set ·
+genuine counterfactual alternatives judged by the same criteria · choice follows from
+contemporaneous evidence · consequences as an obligation ledger · bounded uncertainty with the
+reopen trigger. Discriminating test: can a future reader trace the choice to evidence, see the
+strongest rival, and name the decisive driver that would reverse it? Route first, by consequence:
+a postponement or one-branch detail is usually task/plan/comment material — but a new proposal
+never revokes an accepted baseline, and prior commitments still constrain until changed. See the
+worthiness table in knowledge/documentation-structure.md before allocating this role. Immutable
+after acceptance (supersede via a new linked ADR). Delete this comment once the ADR is written. -->
 
 Once accepted, preserve this decision body. Change direction with a superseding ADR and metadata
 transition rather than rewriting the earlier rationale.

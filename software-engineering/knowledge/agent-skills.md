@@ -76,6 +76,25 @@ translate only the harness plumbing; never fork capability behavior or skill pro
 not reintroduce a single per-machine installer that owns skill placement _and_ MCP configuration —
 the retired Skill Manager (`skill.toml`, `skill install`/`sync`/`doctor`) conflated them.
 
+> **Caveat — Prime Agent is not an MCPM client, and config alone is insufficient.** `mcpm client
+> edit` writes to a fixed client set (Claude Code, Codex CLI, OpenCode, Continue, Goose, Windsurf,
+> …); Prime Agent is not one of them (verified with MCPM 2.15.0 and Prime Agent 0.7.2 on
+> 2026-08-17). Prime Agent deliberately exposes MCP through Python-backed skills, not native agent
+> tools. Its documented `McpIntegration` path currently supports only streamable-HTTP endpoints;
+> `stdio` entries in `mcpServers` are not wired into the kernel and do not become callable merely by
+> adding `{"command":"mcpm","args":["run","<name>"]}` to settings.
+>
+> Keep MCPM as the server source of truth, but bridge it correctly: run one installed server with
+> `mcpm run --http --host 127.0.0.1 --port <fixed-port> <name>`, or aggregate a profile with
+> `mcpm profile run --http ...`; point an HTTP `mcpServers` entry at `http://127.0.0.1:<port>/mcp`;
+> and install a Python-backed skill whose module subclasses `rlm.McpIntegration` and names that
+> server. Prime Agent's base class requires credentials even when a localhost bridge itself is
+> unauthenticated, so use its documented bearer-token configuration (or a deliberately reviewed
+> transport override) rather than embedding a token in static headers. A live probe confirmed MCPM's
+> HTTP bridge and tool discovery. Re-check upstream before assuming this limitation persists: open
+> PR #1378 proposes session-scoped HTTP and stdio MCP support for ACP, but was not merged at the time
+> of verification.
+
 **Portability vs distribution.** This whole section is about _one machine, many harnesses_. Shipping a
 skill to _someone else's_ machine is a different axis — see "Dev-Loop Pattern ≠ Distribution Pattern"
 below. The two compose: a published skill still carries a neutral capability + a manifest, so a

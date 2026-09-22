@@ -3,8 +3,28 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 
-from .contracts import CommandResult, CommandSpec, explanation
+from .contracts import CommandResult, CommandSpec, Explanation, explanation
+
+_SEQUENCE_FIELDS = (
+    "use_when",
+    "do_not_use_when",
+    "prerequisites",
+    "evidence",
+    "limitations",
+    "next_commands",
+    "references",
+)
+
+
+def _normalize_explanation(item: Explanation) -> Explanation:
+    """Keep legacy scalar fields atomic instead of iterating their characters."""
+    normalized = {
+        field: (value,) if isinstance(value := getattr(item, field), str) else tuple(value)
+        for field in _SEQUENCE_FIELDS
+    }
+    return replace(item, **normalized)
 
 
 def configure(parser: argparse.ArgumentParser) -> None:
@@ -17,7 +37,10 @@ def configure(parser: argparse.ArgumentParser) -> None:
 
 
 def handle(args: argparse.Namespace) -> CommandResult:
-    selected = args._explanation_selector(tuple(args.identifiers), kind=args.kind)
+    selected = tuple(
+        _normalize_explanation(item)
+        for item in args._explanation_selector(tuple(args.identifiers), kind=args.kind)
+    )
     detailed = bool(args.identifiers)
     return CommandResult(
         "passed",

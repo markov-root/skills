@@ -19,7 +19,12 @@ import time
 
 from situational_awareness import registry
 from situational_awareness.quota import analysis, reader
-from situational_awareness.quota.models import DEFAULT_THRESHOLDS, EXIT_ERROR, EXIT_NO_DATA
+from situational_awareness.quota.models import (
+    DEFAULT_RELAX,
+    DEFAULT_THRESHOLDS,
+    EXIT_ERROR,
+    EXIT_NO_DATA,
+)
 
 _LABELS = {"five_hour": "5-hour", "seven_day": "weekly"}
 
@@ -63,13 +68,25 @@ def _human(r) -> str:
 
     stale = ""
     if r.stale:
-        stale = f"  (STALE {r.age_seconds}s)" if r.age_seconds is not None else "  (STALE)"
+        stale = (
+            f"  (STALE {r.age_seconds}s)" if r.age_seconds is not None else "  (STALE)"
+        )
+    # ETA targets the effective (near-reset-relaxed) max so the "when do I stop" line
+    # agrees with the action; falls back to the configured max when relaxation is off.
+    eff = (r.relaxation or {}).get("effective", {})
+    max5 = eff.get("max_5h", r.thresholds["max_5h"])
+    max7 = eff.get("max_7d", r.thresholds["max_7d"])
     lines = [
         f"{r.provider} quota{stale} ({r.source})",
-        win(r.five_hour, 2, r.thresholds["max_5h"]),
-        win(r.seven_day, 3, r.thresholds["max_7d"]),
+        win(r.five_hour, 2, max5),
+        win(r.seven_day, 3, max7),
         f"  binding: {r.binding}",
     ]
+    if r.relaxation and r.relaxation.get("active"):
+        lines.append(
+            f"  relax  : near-reset ceiling {r.relaxation['ceiling']:.1f}% → "
+            f"eff max 5h {max5:.1f}% · wk {max7:.1f}%"
+        )
     it = r.forecast["iteration"]
     if it["cost_pct_per_iter"] and it["iters_left"] is not None:
         lines.append(
@@ -112,11 +129,16 @@ def _maybe_refresh(quiet: bool) -> None:
         return
     try:
         subprocess.Popen(
-            [claude, "-p", "/usage"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            [claude, "-p", "/usage"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
     except OSError:
         if not quiet:
-            print("usage-check: --refresh failed to launch claude; using cache", file=sys.stderr)
+            print(
+                "usage-check: --refresh failed to launch claude; using cache",
+                file=sys.stderr,
+            )
         return
     deadline = time.time() + 10
     while time.time() < deadline:
@@ -127,37 +149,72 @@ def _maybe_refresh(quiet: bool) -> None:
         except OSError:
             pass
     if not quiet:
-        print("usage-check: --refresh saw no fresh write within 10s; using cache", file=sys.stderr)
+        print(
+            "usage-check: --refresh saw no fresh write within 10s; using cache",
+            file=sys.stderr,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="usage-check", description="Report provider subscription quota (5h + weekly)."
+        prog="usage-check",
+        description="Report provider subscription quota (5h + weekly).",
     )
     ap.add_argument("--provider", choices=("claude-code", "codex", "opencode"))
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quiet", action="store_true", help="exit code only")
-    ap.add_argument("--forecast", action="store_true", help="note when history is insufficient")
-    ap.add_argument("--fail-on-warn", action="store_true", help="exit 11 in the soft zone")
+    ap.add_argument(
+        "--forecast", action="store_true", help="note when history is insufficient"
+    )
+    ap.add_argument(
+        "--fail-on-warn", action="store_true", help="exit 11 in the soft zone"
+    )
     ap.add_argument("--warn-5h", type=float, default=DEFAULT_THRESHOLDS["warn_5h"])
     ap.add_argument("--max-5h", type=float, default=DEFAULT_THRESHOLDS["max_5h"])
     ap.add_argument("--warn-7d", type=float, default=DEFAULT_THRESHOLDS["warn_7d"])
     ap.add_argument("--max-7d", type=float, default=DEFAULT_THRESHOLDS["max_7d"])
     ap.add_argument("--window", type=int, default=1800, help="burn-rate lookback (s)")
     ap.add_argument("--max-age", type=int, default=900, help="staleness cutoff (s)")
-    ap.add_argument("--mark", metavar="LABEL", help="record a calibration mark and exit")
+    ap.add_argument(
+        "--mark", metavar="LABEL", help="record a calibration mark and exit"
+    )
     ap.add_argument("--label", help="which mark label to calibrate from")
     ap.add_argument(
-        "--refresh", action="store_true", help="nudge a fresh statusline write and wait for it"
+        "--refresh",
+        action="store_true",
+        help="nudge a fresh statusline write and wait for it",
     )
-    ap.add_argument("--wait", action="store_true", help="if wait_for_reset, poll until reset")
+    ap.add_argument(
+        "--wait", action="store_true", help="if wait_for_reset, poll until reset"
+    )
     ap.add_argument("--max-wait", type=int, default=21600)
+    ap.add_argument(
+        "--no-reset-relax",
+        dest="reset_relax",
+        action="store_false",
+        help="disable near-reset relaxation (hold the max threshold flat)",
+    )
+    ap.set_defaults(reset_relax=DEFAULT_RELAX["enabled"])
+    ap.add_argument(
+        "--relax-ceiling",
+        type=float,
+        default=DEFAULT_RELAX["ceiling"],
+        help="used%% the effective max ramps toward at reset (default 99.9)",
+    )
+    ap.add_argument(
+        "--relax-fraction",
+        type=float,
+        default=DEFAULT_RELAX["fraction"],
+        help="ramp over the final FRACTION of each window (default 3/7 ≈ 72h weekly)",
+    )
     args = ap.parse_args(argv)
     provider_name = args.provider or (
         "codex" if os.environ.get("CODEX_THREAD_ID") else "claude-code"
     )
     provider = registry.get(provider_name)
-    session_path = provider.locate("current") if provider_name != "claude-code" else None
+    session_path = (
+        provider.locate("current") if provider_name != "claude-code" else None
+    )
 
     th = {
         "warn_5h": args.warn_5h,
@@ -168,6 +225,18 @@ def main(argv: list[str] | None = None) -> int:
     err = _validate_thresholds(th)
     if err:
         print(f"usage-check: {err}", file=sys.stderr)
+        return EXIT_ERROR
+    if not (0 <= args.relax_ceiling <= 100):
+        print(
+            f"usage-check: --relax-ceiling={args.relax_ceiling} out of range [0,100]",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    if not (0 <= args.relax_fraction <= 1):
+        print(
+            f"usage-check: --relax-fraction={args.relax_fraction} out of range [0,1]",
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
     if args.mark:
@@ -182,6 +251,9 @@ def main(argv: list[str] | None = None) -> int:
         "max_age": args.max_age,
         "fail_on_warn": args.fail_on_warn,
         "label": args.label,
+        "relax": args.reset_relax,
+        "relax_ceiling": args.relax_ceiling,
+        "relax_fraction": args.relax_fraction,
     }
     try:
         r = analysis.read_quota(provider=provider_name, session_path=session_path, **kw)
@@ -223,7 +295,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _do_mark(label: str, quiet: bool, provider: str, session_path) -> int:
-    rate_limits, _, status = reader.load_latest(provider=provider, session_path=session_path)
+    rate_limits, _, status = reader.load_latest(
+        provider=provider, session_path=session_path
+    )
     if status != "ok":
         print(f"usage-check: cannot mark — {status}", file=sys.stderr)
         return EXIT_NO_DATA

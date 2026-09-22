@@ -108,8 +108,24 @@ def run_gitignore_hygiene(root: Path) -> InspectionLayer:
         if not matches_any(f"{prefix}/.publication-probe", patterns)
     ]
 
+    git_root_result = run_process(
+        ("git", "-C", str(root), "rev-parse", "--show-toplevel"),
+        root=root,
+        timeout_seconds=10,
+        max_output_bytes=16_384,
+    )
+    git_root = (
+        Path(git_root_result.stdout.decode(errors="replace").strip()).resolve()
+        if git_root_result.status == "passed"
+        and git_root_result.stdout.decode(errors="replace").strip()
+        else root
+    )
+    try:
+        prefix = root.relative_to(git_root).as_posix()
+    except ValueError:
+        prefix = "."
     tracked = run_process(
-        ("git", "-C", str(root), "ls-files", "-z"),
+        ("git", "-C", str(git_root), "ls-files", "-z", "--", prefix),
         root=root,
         timeout_seconds=30,
         max_output_bytes=MAX_TRACKED_BYTES,
@@ -127,9 +143,15 @@ def run_gitignore_hygiene(root: Path) -> InspectionLayer:
             truncated=tracked.stdout_truncated,
             reason="Git index inspection was unavailable or incomplete",
         )
-    tracked_paths = {
-        item.decode("utf-8", "surrogateescape") for item in tracked.stdout.split(b"\0") if item
-    }
+    tracked_paths = set()
+    prefix_with_slash = f"{prefix}/" if prefix not in {"", "."} else ""
+    for item in tracked.stdout.split(b"\0"):
+        if not item:
+            continue
+        path = item.decode("utf-8", "surrogateescape")
+        if prefix_with_slash and path.startswith(prefix_with_slash):
+            path = path[len(prefix_with_slash) :]
+        tracked_paths.add(path)
     for prefix in PRIVATE_PATH_PREFIXES:
         if any(path == prefix or path.startswith(f"{prefix}/") for path in tracked_paths):
             findings.append(

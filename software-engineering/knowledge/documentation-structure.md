@@ -118,6 +118,89 @@ worked artifact as produced. Learnings distilled from an audit go to `lessons/`;
 **`templates/`** -- Templates for new ADRs, tasks, lessons, and folder READMEs. These set the
 going-forward standard; apply them to new artifacts, not retroactively to the back catalogue.
 
+## Which record, if any? Decide worthiness before allocating
+
+Before creating any record, route the content by **consequence and audience** — not by line count,
+template availability, or the fact that a template exists. Six routes, with contrasting examples:
+
+| Situation | Route | Contrast |
+| --- | --- | --- |
+| Consequential architecture choice: expensive to reverse, crosses boundaries, or constrains future choices | ADR (or the project's equivalent decision record) | "Adopt an event bus between billing and shipping" earns one; a module-local retry helper usually does not — but consequence, not topic, decides: a helper that establishes a shared reliability contract or crosses a boundary can be architectural |
+| Durable nonarchitectural policy the project will live under for a long time | A decision record in the project's existing taxonomy (policy/standard entry or ADR-equivalent role) | A 12-month support window or a data-retention default is durable policy worth recording durably; whether it is also architecture depends on what it constrains — the record decision follows consequence and the project's taxonomy, not the topic's label |
+| Work to do, including ordinary scheduling | Task or plan state | "Run the migration after Friday's release" is schedule, not decision |
+| Current requirements or intended behavior | Specification (living document), kept current | "The API accepts at most 100 items per page" lives in the spec, updated with the change |
+| Implementation-local detail without independent work value | PR description, review thread, or code comment | A helper's naming dies with the branch that justifies it; but a bug or refactor with independent work value earns a task even when the change is small — value, not size, decides |
+| Nothing durable at stake | No record | Routine coordination needs no artifact, and silence about it is correct, not drift; session narration that a successor genuinely needs belongs in scoped operational continuity (a handoff), neither nowhere durable nor in a decision record |
+
+Calibrations that guard both over- and under-documentation:
+
+- **A postponement is usually task state.** "Defer this to Monday" earns no decision record. It
+  earns one only when the deferral establishes a durable rule with consequence ("we do not ship X
+  until Y is true") — the test is whether acting otherwise would require *changing course* through
+  a new decision, or merely doing the work later. A prior accepted commitment still constrains
+  timing until it is changed: relocate future work going forward rather than silently revoking it.
+- **A genuine long-term architectural exclusion is a real decision.** "This store never holds
+  customer PII" is as load-bearing as any positive choice. Do not dismiss a record because it is
+  phrased as an exclusion, and do not promote a trivial one because it is phrased positively.
+- **A proposed option is not a prohibition.** Until accepted under the project's policy, a
+  `proposed` record is an option under consideration — cite it as input, never as operative
+  authority. If the choice matters, drive it to acceptance or rejection.
+- **A superseded record never overrides its successor.** Check status and `superseded_by` before
+  citing any decision; history informs, the successor governs.
+- **Absence of an ADR is not absence of a decision** (see
+  [architecture](architecture.md)); **presence of an ADR is not worthiness by itself** — a
+  well-formed record still needs the warrant its content standard describes.
+
+After routing, **open the selected role's content standard before authoring** so the record is
+written to its bar, not just filed in its folder.
+
+## Record quality bars
+
+Each record role's template carries a short "quality bar" -- an imperative reminder of what makes a
+good instance of that role, placed as a comment the author reads and then deletes. The bars are
+guidance, not gates: they shape authoring at the point of creation and scale to the record's
+consequence (a one-line lesson does not need every property). Template compliance is explicitly
+distinct from semantic warrant: a record that satisfies every structural check can still fail its
+role's content standard, and fixing the template never substitutes for the content judgment.
+
+The bars now point to the fuller per-role content standard, which states each role's telos, content
+properties, discriminating test, and exemplar/anti-example:
+
+- [`documentation-record-content-standards.md`](documentation-record-content-standards.md) -- the
+  seven record roles (task, ADR, audit, research, lesson, handoff, plan).
+- [`documentation-living-content-standards.md`](documentation-living-content-standards.md) -- the
+  eight living roles (specification, knowledge, reference, standard, guide, roadmap, changelog,
+  runbook).
+- [`documentation-meta-content-standards.md`](documentation-meta-content-standards.md) -- the two
+  meta-roles (index, template).
+
+In brief:
+
+- **Task** -- independent, valuable, right-sized to one session / one reviewable PR, testable, ready,
+  a vertical slice; done means every acceptance criterion has durable evidence; oversized work is
+  split by vertical slice under a parent epic.
+- **ADR** -- one architecturally-significant decision, with context, alternatives, and consequences
+  (including the negative and neutral ones); immutable after acceptance and superseded via a new
+  linked record.
+- **Audit** -- dated, traceable observations; explicit objective, scope, and what was not tested;
+  method before conclusions; findings kept separate from recommendations; append-only after completion.
+- **Research** -- a decision-relevant question, a protocol-like method, sources with access dates,
+  claims typed by strength; it informs decisions but is not a decision.
+- **Lesson** -- timestamped, with provenance and an explicit scope of applicability (use when… / do
+  NOT use when…), an actionable inference with a retrieval trigger and a review/expiry condition.
+- **Handoff** -- exactly one current per scope, self-contained for a cold reader, continuation-state
+  over history, with owned action items and preserved agent context.
+- **Plan** -- an execution-plan / progress log: objective, bankable checkpoints, an append-only
+  progress log with evidence, and a present resume point, so work resumes from evidence rather than
+  the conversation.
+
+**Cross-cutting properties of any good durable record.** Every bar above is an instance of the
+shared invariants that the per-role standards expand: purpose-bound; dated and versioned;
+evidence-linked; method-transparent; limits-aware; append-only or traceably revised, so corrections
+preserve provenance; actionable without overstating authority (distinguish evidence, interpretation,
+recommendation, and ownership); and optimized for the next reader, whether cold human or agent (top
+summary, structure, links).
+
 ## Source discipline
 
 Do not cite every sentence merely because it is non-obvious. That creates citation noise and an
@@ -150,14 +233,53 @@ authority that never made that decision.
 ## Voice and hygiene -- what does not belong in a repo
 
 Everything committed—docs, comments, config, sample data—may be read by collaborators, auditors,
-automation, or future maintainers. Public artifacts may later become public; access-controlled
-repositories can legitimately contain bounded operational context. Write for the artifact's real
-audience and keep credentials and private keys out of Git. There are two kinds of cleanup:
+automation, or future maintainers. Private artifacts may later become public (a repository changes
+audience, an export allowlist ships, an archive leaks); access-controlled repositories can
+legitimately contain bounded operational context. Write for the artifact's real audience and keep
+credentials and private keys out of Git. There are two kinds of cleanup:
 **content and voice** (reword) and **must-never-commit** (remove from the current tree). If a secret
 entered history, rotate/revoke it first; then use an approved, coordinated history-rewrite procedure
 when reducing historical exposure is warranted. Rewriting history does not make an exposed secret
 trustworthy again. Run the current-tree sweep before a repo is first pushed or shared outside the
 team, and apply the content rules on every PR thereafter.
+
+### Publication boundaries are three separate questions
+
+"Should this be committed?", "who may read it?", and "does this release need it?" are independent
+judgments that use different evidence. Collapsing them into one rule produces both leaks and
+needlessly hidden records:
+
+1. **Version-control safety** — may this content exist in this repository? Keep real credentials
+   out of Git. For other restricted material, check whether the project's permissions cover this
+   storage and access arrangement. Permission to retain a private copy does not imply permission
+   to redistribute it; evaluate the proposed export separately. Correctly licensed content is
+   ordinary tracked source, not a reason for exclusion by itself. Track material when its durable
+   value justifies retention within the permitted boundary.
+2. **Audience / access boundary** — who is this record written for? A private source repository,
+   a public source repository with contributor-facing records, and an access-controlled operations
+   space are all legitimate. **There is no role-to-privacy rule:** an ADR, task, audit, or plan may
+   be a valuable public contributor record, and a handoff or runbook may be legitimately private.
+   A project may also be private-only by posture; that is a boundary choice, not a documentation
+   defect. Making the posture findable for future collaborators is worthwhile — a decision record
+   is one good home for it, not an automatic requirement.
+3. **Release / export membership** — does this installed or distributed payload need this file?
+   Declared exports (an install allowlist, a package, an image) are decided by consumer need, not
+   by what Git tracks. Tracking, history, and export membership are different populations; see
+   [release engineering](release-engineering.md) and
+   [git and versioning](git-and-versioning.md).
+
+Classify content, not labels: the answer comes from the specific audience and sensitivity of the
+words on the page. Inappropriately exposed sensitive content inside a nominally public record is
+still a defect (remediate it under the applicable policy; rotate/revoke exposed credentials).
+Operational detail inside a correctly scoped private runbook is still legitimate. Neither the role
+name nor the presence of host paths decides by itself.
+
+When authoring a record that will face outside contributors, keep load-bearing constraints and
+decision rationale while dropping irrelevant author-machine detail (hostnames, session narration,
+agent names). The same details are appropriate in an operational record scoped to the people and
+systems they describe — see "No internal-environment leakage" below for the runbook case. Record
+worthiness (whether the record should exist at all) is a separate prior question from where it
+may travel.
 
 ### Write as the institution, not the author or the tool
 

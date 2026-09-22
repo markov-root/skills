@@ -14,13 +14,37 @@ description: >-
 license: Apache-2.0
 compatibility: Requires Python 3.11+ (stdlib only; needs tomllib)
 metadata:
-  version: "0.5.0"
+  version: "0.8.1"
 ---
 
 # Skill Feedback
 
 Make the skill library improve from real use without teaching every skill its
 own feedback system.
+
+## Invocation
+
+Resolve `<skill-root>` from the directory containing this loaded `SKILL.md`, following
+symlinks to the artifact when needed. It is a placeholder for the actual location supplied
+by the harness, not a fixed install directory or the shell's working directory. If that
+location is unavailable, use the harness's skill location metadata or ask for it rather
+than guessing a home-directory path.
+
+Prefer the named PATH command after checking once per session that it targets this
+artifact: use `command -v`, then inspect the resolved symlink or launcher target and
+runner against `assets/cli.json`. A matching command name or version alone is insufficient.
+If the command is absent, points elsewhere, or cannot be verified, use the bundled
+invocation below. Quote the resolved root so installation paths containing spaces work.
+Keep the caller's working directory. PATH installation and skill-manager are optional;
+these instructions work with an ordinary skills.sh installation too.
+
+Preferred command: `skill-feedback`. Bundled fallback:
+
+```sh
+"<skill-root>/scripts/skill-feedback" --help
+```
+
+Examples below use `skill-feedback` as shorthand for either verified invocation.
 
 ## Ownership boundary
 

@@ -6,8 +6,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from ..documents.validation import expand_markdown_paths, validate_documents
-from ..policy.manifest import Manifest
+from ..documents.contracts import GENERIC_ROLES
+from ..documents.markdown import DocFinding
+from ..documents.validation import (
+    expand_markdown_paths,
+    scan_typed_documents,
+    validate_adopted_documents,
+    validate_documents,
+)
+from ..policy.document_paths import DocumentContainment
+from ..policy.manifest import Manifest, ManifestV2
 from ..project.discovery import discover_instructions, discover_project
 from ..project.health import (
     inspect_ci_coverage,
@@ -114,22 +122,25 @@ def diagnose(root: Path, manifest: Manifest, start: str | Path, *, ci: bool) -> 
                 True,
             )
         )
-    for issue in validate_documents(root, manifest.docs, doc_paths):
-        severe = issue.code in {"unsafe-link", "forbidden-syntax"}
-        groups["docs"].append(
-            Finding(
-                f"docs.{issue.code}",
-                getattr(issue, "severity", "error" if severe else "warning"),
-                f"{issue.path}:{issue.line}: {issue.message}",
-                getattr(
-                    issue,
-                    "rationale",
-                    "declared documentation must remain navigable and structurally current",
-                ),
-                getattr(issue, "repair", "repair the referenced documentation finding"),
-                getattr(issue, "ci_blocking", True),
+    if isinstance(manifest, ManifestV2):
+        _diagnose_v2_documents(groups["docs"], root, manifest, doc_paths)
+    else:
+        for issue in validate_documents(root, manifest.docs, doc_paths):
+            severe = issue.code in {"unsafe-link", "forbidden-syntax"}
+            groups["docs"].append(
+                Finding(
+                    f"docs.{issue.code}",
+                    getattr(issue, "severity", "error" if severe else "warning"),
+                    f"{issue.path}:{issue.line}: {issue.message}",
+                    getattr(
+                        issue,
+                        "rationale",
+                        "declared documentation must remain navigable and structurally current",
+                    ),
+                    getattr(issue, "repair", "repair the referenced documentation finding"),
+                    getattr(issue, "ci_blocking", True),
+                )
             )
-        )
     if not manifest.checks:
         groups["policy"].append(
             Finding(
@@ -145,6 +156,82 @@ def diagnose(root: Path, manifest: Manifest, start: str | Path, *, ci: bool) -> 
     return DoctorReport(
         status(findings, ci=ci), findings, sum(item.ci_blocking for item in findings)
     )
+
+
+def _diagnose_v2_documents(
+    findings: list[Finding],
+    root: Path,
+    manifest: ManifestV2,
+    doc_paths: Sequence[str],
+) -> None:
+    repository_root = root.resolve()
+    if repository_root != manifest.path.parent.resolve():
+        raise AssertionError("manifest-v2 doctor root must remain the manifest repository root")
+    global_containment = DocumentContainment.for_global(repository_root)
+    global_scan = scan_typed_documents(
+        repository_root,
+        manifest.docs.currency,
+        containment=global_containment,
+    )
+    _append_v2_doc_findings(
+        findings,
+        validate_documents(
+            repository_root,
+            manifest.docs,
+            doc_paths,
+            containment=global_containment,
+            typed_scan=global_scan,
+        ),
+        project="global",
+    )
+    global_identities = frozenset(
+        f"{record.metadata['role']}:{record.metadata['id']}"
+        for record in global_scan.records
+        if record.metadata.get("role") in GENERIC_ROLES
+    )
+    for scope in manifest.document_projects.projects:
+        containment = DocumentContainment.for_scope(repository_root, scope)
+        scan = scan_typed_documents(
+            repository_root,
+            scope.currency,
+            containment=containment,
+            extra_known_identities=global_identities,
+        )
+        _append_v2_doc_findings(
+            findings,
+            validate_adopted_documents(
+                repository_root,
+                scope.currency,
+                containment=containment,
+                extra_known_identities=global_identities,
+                typed_scan=scan,
+            ),
+            project=scope.id,
+        )
+
+
+def _append_v2_doc_findings(
+    findings: list[Finding],
+    issues: Iterable[DocFinding],
+    *,
+    project: str,
+) -> None:
+    for issue in issues:
+        severe = issue.code in {"unsafe-link", "forbidden-syntax"}
+        findings.append(
+            Finding(
+                f"docs.{issue.code}",
+                getattr(issue, "severity", "error" if severe else "warning"),
+                f"project={project}: {issue.path}:{issue.line}: {issue.message}",
+                getattr(
+                    issue,
+                    "rationale",
+                    "declared documentation must remain navigable and structurally current",
+                ),
+                getattr(issue, "repair", "repair the referenced documentation finding"),
+                getattr(issue, "ci_blocking", True),
+            )
+        )
 
 
 def aggregate(groups: Mapping[str, Iterable[Finding]]) -> tuple[Finding, ...]:

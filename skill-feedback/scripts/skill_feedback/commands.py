@@ -58,6 +58,7 @@ Options for recording:
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import hmac
 import json
@@ -83,9 +84,12 @@ from .model import (
     DELIVERY_STATES,
     EVENT_SCHEMA_VERSION,
     EVENT_TYPES,
+    EVIDENCE_NAMESPACES,
+    EVIDENCE_REGISTRY_VERSION,
     IMPACTS,
     KINDS,
     OUTCOMES,
+    PILOT_REQUIRED_FIELDS,
     PRIVACY_CONFIG_VERSION,
     SIGNALS,
     SKILL_NAME_PATTERN,
@@ -132,9 +136,15 @@ from .read_model import (
     authorize_delivery,
     body_handle_for,
     build_closeout,
+    build_decision_strata,
+    build_evaluation_manifest,
+    build_readiness,
     build_stats,
     metadata_views,
     reconcile_disposition_status,
+    DEFAULT_TARGET_POLICY,
+    ESTIMATORS,
+    TARGET_POLICIES,
 )
 from .storage import (
     FEEDBACK_HOME,
@@ -694,6 +704,159 @@ def _skill_relative_note_location(
         ) from exc
 
 
+def _resolve_invocation_link(handle: str | None) -> tuple[str | None, str | None]:
+    """Explicit-handle-only observation linkage (ADR 0020 D2).
+
+    Link only when the propagated handle resolves to exactly one
+    ``invocation.started`` event. An absent handle is simply unlinked (no
+    diagnostic); an invalid (zero matches) or ambiguous (>= 2 matches) handle is
+    left unlinked with a visible diagnostic. Linkage is never inferred from time
+    proximity, skill/session name, or the number of active invocations.
+    """
+    if not handle:
+        return None, None
+    starts = [
+        event
+        for event in _read_events()
+        if event["event_type"] == "invocation.started"
+        and event.get("invocation_id") == handle
+    ]
+    if len(starts) == 1:
+        return handle, None
+    if not starts:
+        return (
+            None,
+            f"invocation handle {handle!r} does not resolve to a known "
+            "invocation.started; observation left unlinked",
+        )
+    return (
+        None,
+        f"invocation handle {handle!r} is ambiguous ({len(starts)} matching "
+        "starts); observation left unlinked",
+    )
+
+
+def _resolve_test_reference(body: str, cwd: Path) -> str:
+    """Resolve a ``test:<dotted-node>`` reference by filesystem + AST only -- no
+    import and no execution (ADR 0021 D2). The longest dotted prefix that is a
+    real ``.py`` module (or package ``__init__``) under ``cwd`` is located, then
+    the remaining ``Class[.method]`` chain is confirmed by parsing the module's
+    AST. A missing module or absent chain is a determined ``unverified`` (not a
+    real test); only a read/parse failure is ``unavailable``."""
+    if not body:
+        return "unverified"
+    segments = body.split(".")
+    module_file: Path | None = None
+    rest: list[str] = []
+    for split in range(len(segments), 0, -1):
+        base = cwd.joinpath(*segments[:split])
+        candidate = base.with_suffix(".py")
+        package = base / "__init__.py"
+        if candidate.is_file():
+            module_file, rest = candidate, segments[split:]
+            break
+        if package.is_file():
+            module_file, rest = package, segments[split:]
+            break
+    if module_file is None:
+        return "unverified"
+    if not rest:
+        return "verified"
+    try:
+        node: ast.AST = ast.parse(module_file.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+        return "unavailable"
+    for name in rest:
+        match = next(
+            (
+                child
+                for child in ast.iter_child_nodes(node)
+                if isinstance(
+                    child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+                )
+                and child.name == name
+            ),
+            None,
+        )
+        if match is None:
+            return "unverified"
+        node = match
+    return "verified"
+
+
+def _resolve_commit_reference(body: str, cwd: Path) -> str:
+    """``commit:<rev>`` -> the rev resolves to a commit object in the repo at
+    ``cwd`` (ADR 0021 D2). Not a git repository or a missing git binary is
+    ``unavailable``; a well-formed repo without the object is ``unverified``."""
+    if not body:
+        return "unverified"
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "cat-file", "-e", f"{body}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return "unavailable"
+    if result.returncode == 0:
+        return "verified"
+    if "not a git repository" in (result.stderr or "").lower():
+        return "unavailable"
+    return "unverified"
+
+
+def _resolve_invocation_reference(body: str, events: list[dict]) -> str:
+    """``invocation:<id>`` -> exactly one ``invocation.started`` in the ledger
+    (ADR 0021 D2). Zero is ``unverified``; two or more is ``conflicting``."""
+    if not body:
+        return "unverified"
+    starts = [
+        event
+        for event in events
+        if event["event_type"] == "invocation.started"
+        and event.get("invocation_id") == body
+    ]
+    if len(starts) == 1:
+        return "verified"
+    if not starts:
+        return "unverified"
+    return "conflicting"
+
+
+def _resolve_evidence_reference(
+    reference: str, *, events: list[dict], cwd: Path
+) -> dict:
+    """Content-free record-time verification of one typed evidence reference
+    (ADR 0021 D2). Returns ``{reference, type, result, resolver_version}`` and
+    never a ``content`` field or any artifact bytes. An untyped or undeclared
+    namespace is retained for audit but reported ``unverified`` (ineligible);
+    it is never coerced to a stronger tier."""
+    namespace, separator, body = reference.partition(":")
+    receipt = {"reference": reference, "resolver_version": EVIDENCE_REGISTRY_VERSION}
+    if not separator:
+        receipt.update(type="untyped", result="unverified")
+        return receipt
+    if namespace not in EVIDENCE_NAMESPACES:
+        receipt.update(type="unknown", result="unverified")
+        return receipt
+    receipt["type"] = namespace
+    if namespace == "test":
+        receipt["result"] = _resolve_test_reference(body, cwd)
+    elif namespace == "invocation":
+        receipt["result"] = _resolve_invocation_reference(body, events)
+    elif namespace == "commit":
+        receipt["result"] = _resolve_commit_reference(body, cwd)
+    elif namespace == "task":
+        # Declared namespace, but no authoritative local resolver from the CLI's
+        # vantage yet -> unavailable (ineligible), never coerced to verified.
+        receipt["result"] = "unavailable"
+    else:  # user
+        # A bare handle never proves what a user said (ADR 0021 D2).
+        receipt["result"] = "unverified"
+    return receipt
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     note = _read_note(args.note)
     privacy_findings = _enforce_qualitative_privacy(
@@ -711,7 +874,13 @@ def cmd_record(args: argparse.Namespace) -> int:
     signal = args.signal or _default_signal(args.kind)
     status = _default_status(args.kind)
     feature = _safe_header_value("feature", args.feature)
-    invocation = _safe_header_value("invocation", args.invocation)
+    raw_invocation = _safe_header_value("invocation", args.invocation)
+    # C3 (ADR 0020 D2): link only through an explicitly propagated handle that
+    # resolves to exactly one invocation.started; absent/invalid/ambiguous stays
+    # unlinked with a visible diagnostic. Linkage is never inferred.
+    invocation, invocation_link_diagnostic = _resolve_invocation_link(raw_invocation)
+    if invocation_link_diagnostic:
+        print(f"skill-feedback: {invocation_link_diagnostic}", file=sys.stderr)
     tags = []
     for tag in args.tag or []:
         safe_tag = _safe_header_value("tag", tag)
@@ -760,6 +929,22 @@ def cmd_record(args: argparse.Namespace) -> int:
     body_sha256 = _body_sha256(note)
     entry_sha256 = _entry_sha256(header, note)
 
+    # C4 (ADR 0021 D2): verify each typed evidence reference at record time and
+    # store a content-free receipt alongside the preserved raw references. The
+    # ledger read and CWD are resolved once for the whole reference list.
+    evidence_references = args.evidence or []
+    if evidence_references:
+        ledger_events = _read_events()
+        resolver_cwd = Path.cwd()
+        evidence_verification = [
+            _resolve_evidence_reference(
+                reference, events=ledger_events, cwd=resolver_cwd
+            )
+            for reference in evidence_references
+        ]
+    else:
+        evidence_verification = []
+
     event = _build_event(
         event_type="observation.recorded",
         skill=args.skill,
@@ -780,6 +965,7 @@ def cmd_record(args: argparse.Namespace) -> int:
             "impact": args.impact,
             "outcome": args.outcome,
             "evidence": args.evidence or [],
+            "evidence_verification": evidence_verification,
             "note_sha256": hashlib.sha256(note.encode()).hexdigest(),
             "note_digest": {
                 "algorithm": "sha256",
@@ -1414,20 +1600,44 @@ def cmd_verify(args: argparse.Namespace) -> int:
             "invalid verification receipt: feedback_id does not match the target"
         )
     check_identity = str(receipt["check_identity"])
-    # ADR 0019 D4: the check must resolve to an existing *regular file* that is not
-    # the receipt itself -- a directory or a self-reference is not evidence. `samefile`
-    # compares device+inode, so it also excludes a symlink or hardlink to the receipt
-    # (N1, re-verify round). The verifier still does NOT execute the check (no
-    # code-exec surface); binding the check to the artifact under verification is
-    # deferred to C4, so an unrelated existing file still resolves today.
+    # ADR 0019 D4 / N1: the check must resolve to an existing *regular file* that is
+    # not the receipt itself. `samefile` compares device+inode, excluding a
+    # directory, self-reference, symlink, or hardlink to the receipt.
     check_path = Path(check_identity) if check_identity else None
     check_resolves = False
+    check_digest: str | None = None
     if check_path and check_path.is_file():
         try:
             check_resolves = not check_path.samefile(receipt_path)
         except OSError:
             check_resolves = False
-    verified = observed_result == "pass" and check_resolves
+        if check_resolves:
+            try:
+                check_digest = hashlib.sha256(check_path.read_bytes()).hexdigest()
+            except OSError:
+                check_resolves = False
+                check_digest = None
+    # ADR 0021 D7: artifact binding closes the inherited R3-1 residual as far as is
+    # possible without executing the check. A receipt that pins `artifact_digest` is
+    # `bound` iff it equals the check's *current* content digest, and `conflicting`
+    # on mismatch -- deterministic staleness/substitution detection (AC-1.4) that
+    # downgrades the state to unverified. A receipt with no pinned digest is
+    # `unbound`: legacy-compatible, the verification_state is unchanged, but the read
+    # side does not treat it as artifact-attested. NOTE (named residual): binding by
+    # digest cannot prove the check actually exercises the artifact -- that needs
+    # executing the check, which the verifier deliberately never does.
+    declared_digest = receipt.get("artifact_digest")
+    if declared_digest is None:
+        artifact_binding = "unbound"
+    elif check_digest is not None and str(declared_digest) == check_digest:
+        artifact_binding = "bound"
+    else:
+        artifact_binding = "conflicting"
+    verified = (
+        observed_result == "pass"
+        and check_resolves
+        and artifact_binding != "conflicting"
+    )
     verification_state = "verified" if verified else "unverified"
     receipt_id = _new_id("rcpt")
     event = _build_event(
@@ -1445,6 +1655,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
             "acceptance_criterion": str(receipt["acceptance_criterion"]),
             "verifier_source": str(receipt["verifier_source"]),
             "check_identity": check_identity,
+            "check_digest": check_digest,
+            "artifact_digest": (
+                str(declared_digest) if declared_digest is not None else None
+            ),
+            "artifact_binding": artifact_binding,
             "oracle": str(receipt["oracle"]),
             "observed_result": observed_result,
             "observed_at": str(receipt["observed_at"]),
@@ -1462,6 +1677,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         "purpose": purpose,
         "observed_result": observed_result,
         "check_resolved": check_resolves,
+        "artifact_binding": artifact_binding,
         "event_id": event["event_id"],
         "event_file": str(event_path),
     }
@@ -2009,6 +2225,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
         before=before,
         skills=set(args.skill or []),
         group_by=group_by,
+        allow_partial=getattr(args, "allow_partial_descriptive", False),
     )
     coverage = _automatic_coverage()
     coverage_by_skill = {
@@ -2074,6 +2291,20 @@ def cmd_stats(args: argparse.Namespace) -> int:
             f"verified_with_test={preservation['verified_with_test']} "
             f"coverage={group['coverage']['status']}"
         )
+        # C4 (ADR 0021 D8): a source-stratified block so the raw-vs-eligible
+        # distinction is visible without parsing JSON.
+        distribution = group.get("source_distribution", {})
+        if distribution.get("raw_total"):
+            print(
+                f"  source-stratified ({distribution['raw_total']} obs, "
+                f"{distribution['eligible_total']} downstream-eligible):"
+            )
+            for source, source_stats in distribution["by_source"].items():
+                print(
+                    f"    {source}: count={source_stats['count']} "
+                    f"({source_stats['rate_pct']}%) "
+                    f"eligible={source_stats['eligible']}"
+                )
     if result["negative_after_praise"]:
         print(
             "warning: "
@@ -2187,20 +2418,63 @@ def _deletion_plan(events: list[dict], filters: dict) -> dict:
     }
 
 
-def _apply_event_deletion(filters: dict) -> tuple[dict, Path]:
+def _apply_event_deletion(
+    filters: dict, *, deletion_reason: str = "targeted_delete"
+) -> tuple[dict, Path]:
     with _file_lock(_event_lock_path(), private=True):
         events = _read_events_unlocked()
-        selected_ids = {event["event_id"] for event in _select_events(events, filters)}
+        selected = _select_events(events, filters)
+        if deletion_reason == "retention":
+            # Tombstones are content-free retention evidence, not retained content;
+            # expiring them would erase the only signal that historical windows were
+            # censored and could make old manifests appear valid again.
+            selected = [
+                event
+                for event in selected
+                if event.get("event_type") != "observation.tombstoned"
+            ]
+        selected_ids = {event["event_id"] for event in selected}
         retained = [event for event in events if event["event_id"] not in selected_ids]
+        expiring = [
+            event
+            for event in selected
+            if event.get("event_type") == "observation.recorded"
+        ]
+        existing_versions = [
+            (event.get("payload") or {}).get("corpus_version")
+            for event in events
+            if event.get("event_type") == "observation.tombstoned"
+        ]
+        corpus_version = max(
+            (
+                version
+                for version in existing_versions
+                if isinstance(version, int) and not isinstance(version, bool)
+            ),
+            default=1,
+        )
+        tombstones = [
+            _tombstone_event(
+                origin,
+                corpus_version + offset + 1,
+                deletion_reason=deletion_reason,
+            )
+            for offset, origin in enumerate(expiring)
+        ]
         plan = {
             "version": EVENT_SCHEMA_VERSION,
             "matched": len(selected_ids),
             "retained": len(retained),
+            "tombstones_emitted": len(tombstones),
             "filters": _filter_summary(filters),
             "sample_event_ids": sorted(selected_ids)[:20],
             "applied": True,
         }
-        path = _write_events_unlocked(retained) if selected_ids else _event_path()
+        path = (
+            _write_events_unlocked([*retained, *tombstones])
+            if selected_ids
+            else _event_path()
+        )
     return plan, path
 
 
@@ -2213,6 +2487,7 @@ def cmd_delete(args: argparse.Namespace) -> int:
     else:
         plan = _deletion_plan(_read_events(), filters)
         plan["applied"] = False
+        plan["tombstones_emitted"] = 0
         path = _event_path()
     plan["event_file"] = str(path)
     if args.json:
@@ -2227,13 +2502,17 @@ def cmd_delete(args: argparse.Namespace) -> int:
     return 0
 
 
-def _tombstone_event(origin: dict, corpus_version: int) -> dict:
-    """A content-free successor event recording that a record was retention-expired
-    (R5/AC-8): retention must be observable in the append-only ledger, never a
-    silent truncation. Carries no body/text — only the prior event id and note
-    digest plus a monotonic corpus version."""
+def _tombstone_event(
+    origin: dict, corpus_version: int, *, deletion_reason: str = "retention"
+) -> dict:
+    """Build content-free deletion evidence without reconstructing note content.
+
+    The opaque prior IDs/digest preserve doctor linkage; the prior class/timestamp
+    support aggregate censoring, and corpus_version monotonically versions the
+    retained evidence (ADR 0017 R5 / ADR 0022 D7).
+    """
     payload = origin.get("payload") or {}
-    return {
+    event = {
         "schema_version": EVENT_SCHEMA_VERSION,
         "event_type": "observation.tombstoned",
         "event_id": _new_id("evt"),
@@ -2248,9 +2527,14 @@ def _tombstone_event(origin: dict, corpus_version: int) -> dict:
             "feedback_id": payload.get("feedback_id"),
             "prior_event_id": origin.get("event_id"),
             "prior_note_sha256": payload.get("note_sha256"),
+            "prior_event_type": origin.get("event_type"),
+            "prior_occurred_at": origin.get("occurred_at"),
+            "deletion_reason": deletion_reason,
             "corpus_version": corpus_version,
         },
     }
+    _validate_event(event)
+    return event
 
 
 def _retention_filters(days: int) -> dict:
@@ -2299,33 +2583,18 @@ def cmd_retention(args: argparse.Namespace) -> int:
             "content_capture": False,
             "matched": 0,
             "retained": len(_read_events()),
+            "tombstones_emitted": 0,
             "applied": False,
             "event_file": str(_event_path()),
         }
     else:
         filters = _retention_filters(days)
         if args.apply:
-            # Capture the record-bearing events being expired BEFORE deletion so
-            # retention can leave a content-free tombstone for each (R5/AC-8), then
-            # delete the originals.
-            expiring = [
-                event
-                for event in _select_events(_read_events(), filters)
-                if event.get("event_type") == "observation.recorded"
-            ]
-            plan, path = _apply_event_deletion(filters)
-            existing_tombstones = sum(
-                1
-                for event in _read_events()
-                if event.get("event_type") == "observation.tombstoned"
-            )
-            for offset, origin in enumerate(expiring):
-                _append_event(
-                    _tombstone_event(origin, existing_tombstones + 2 + offset)
-                )
+            plan, path = _apply_event_deletion(filters, deletion_reason="retention")
         else:
             plan = _deletion_plan(_read_events(), filters)
             plan["applied"] = False
+            plan["tombstones_emitted"] = 0
             path = _event_path()
         plan.update(
             {
@@ -2734,6 +3003,7 @@ RESERVED = (
     "delete",
     "retention",
     "collection",
+    "pilot",
 )
 
 
@@ -2795,6 +3065,374 @@ def record_parser(
     p.add_argument("--dir", help="write under PATH/docs/feedback instead of resolving")
     p.add_argument("--json", action="store_true")
     return p
+
+
+def cmd_decision(args: argparse.Namespace) -> int:
+    """C5 (ADR 0022 D1): record a prospective decision or attach its later outcome.
+
+    `log` freezes the full policy context in one content-free `decision.logged`
+    event (validated by the model schema). `outcome` appends a separate
+    `decision.outcome` event that references an existing decision by id and carries
+    only the measured outcome/oracle/cost -- it can never backfill policy context.
+    """
+    if args.action == "strata":
+        skills = {args.skill} if args.skill else set()
+        report = build_decision_strata(_read_events(), skills)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(
+                f"decision strata (contract v{report['contract_version']}; "
+                f"covariates from {report['covariate_source']}): "
+                f"{report['total_decisions']} decisions, "
+                f"{report['temporal_anomalies']} temporal anomalies"
+            )
+            for name, stratum in report["strata"].items():
+                print(
+                    f"  {name}: decisions={stratum['decisions']} "
+                    f"outcomes={stratum['outcomes']} "
+                    f"coverage={stratum['outcome_coverage_rate']} "
+                    f"overlap={stratum['overlap_decisions']} "
+                    f"anomalies={stratum['temporal_anomalies']}"
+                )
+        return 0
+    _validate_skill_name(args.skill)
+    if args.action == "log":
+        raw = args.payload
+        if raw == "-":
+            raw = sys.stdin.read()
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise FeedbackError(f"decision log payload is not valid JSON: {exc}")
+        if not isinstance(payload, dict):
+            raise FeedbackError("decision log payload must be a JSON object")
+        payload.setdefault("decision_id", _new_id("dec"))
+        event = _build_event(
+            event_type="decision.logged",
+            skill=args.skill,
+            invocation_id=args.invocation,
+            actor_type="automation",
+            source="automation",
+            payload=payload,
+        )
+        event_path = _append_event(event)
+        result = {
+            "version": 1,
+            "ok": True,
+            "skill": args.skill,
+            "decision_id": payload["decision_id"],
+            "event_id": event["event_id"],
+            "event_file": str(event_path),
+        }
+    else:  # outcome
+        known = any(
+            event["event_type"] == "decision.logged"
+            and event["payload"].get("decision_id") == args.decision_id
+            and (event.get("skill") or {}).get("name") == args.skill
+            for event in _read_events()
+        )
+        if not known:
+            raise FeedbackError(
+                f"unknown decision_id {args.decision_id!r} for {args.skill}; log the "
+                "decision before attaching an outcome"
+            )
+        payload = {
+            "decision_id": args.decision_id,
+            "outcome": args.outcome,
+            "oracle": args.oracle,
+        }
+        if args.cost is not None:
+            payload["cost"] = args.cost
+        event = _build_event(
+            event_type="decision.outcome",
+            skill=args.skill,
+            invocation_id=None,
+            actor_type="automation",
+            source="deterministic",
+            payload=payload,
+        )
+        event_path = _append_event(event)
+        result = {
+            "version": 1,
+            "ok": True,
+            "skill": args.skill,
+            "decision_id": args.decision_id,
+            "outcome": args.outcome,
+            "event_id": event["event_id"],
+            "event_file": str(event_path),
+        }
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"{result['decision_id']}: decision {args.action} recorded")
+    return 0
+
+
+def _read_json_payload(raw: str, label: str) -> dict:
+    if raw == "-":
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise FeedbackError(f"{label} payload is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise FeedbackError(f"{label} payload must be a JSON object")
+    return payload
+
+
+def _pilot_assignment(
+    pilot_id: str,
+    seed: int,
+    sequence: int,
+    mechanism: str,
+    actions: list[str],
+) -> str:
+    if mechanism == "deterministic":
+        return actions[0]
+    if mechanism == "interleaved":
+        return actions[(seed + sequence) % len(actions)]
+    digest = hashlib.sha256(f"{pilot_id}:{seed}:{sequence}".encode()).digest()
+    return actions[int.from_bytes(digest[:8], "big") % len(actions)]
+
+
+def cmd_pilot(args: argparse.Namespace) -> int:
+    """Authorize a bounded pilot or validate its mechanics without appending use data."""
+    _validate_skill_name(args.skill)
+    if args.action == "authorize":
+        payload = _read_json_payload(args.payload, "pilot authorization")
+        missing = PILOT_REQUIRED_FIELDS - payload.keys()
+        if missing:
+            raise FeedbackError(
+                "pilot authorization payload missing: " + ", ".join(sorted(missing))
+            )
+        unknown = set(payload) - PILOT_REQUIRED_FIELDS
+        if unknown:
+            raise FeedbackError(
+                "pilot authorization payload has unknown fields: "
+                + ", ".join(sorted(unknown))
+            )
+        payload = {**payload, "pilot_id": _new_id("pilot")}
+        event = _build_event(
+            event_type="pilot.authorized",
+            skill=args.skill,
+            invocation_id=None,
+            actor_type="user",
+            actor_id=payload["owner"],
+            source="explicit_user",
+            payload=payload,
+        )
+        event_path = _append_event(event)
+        result = {
+            "version": 1,
+            "ok": True,
+            "skill": args.skill,
+            "pilot_id": payload["pilot_id"],
+            "event_id": event["event_id"],
+            "event_file": str(event_path),
+        }
+    else:
+        event = next(
+            (
+                item
+                for item in reversed(_read_events())
+                if item.get("event_type") == "pilot.authorized"
+                and (item.get("skill") or {}).get("name") == args.skill
+                and (item.get("payload") or {}).get("pilot_id") == args.pilot_id
+            ),
+            None,
+        )
+        if event is None:
+            raise FeedbackError(f"unknown pilot_id {args.pilot_id!r} for {args.skill}")
+        plan = event["payload"]
+        actions = list(
+            (plan.get("population") or {}).get(
+                "candidate_actions", ["control", "treatment"]
+            )
+        )
+        budget_limit = plan["budget"]["max_assignments"]
+        stop_limit = plan["stop_criteria"]["max_assignments"]
+        assignment_count = min(budget_limit, stop_limit)
+        assignments = [
+            {
+                "sequence": sequence + 1,
+                "assignment": _pilot_assignment(
+                    args.pilot_id,
+                    args.seed,
+                    sequence,
+                    plan["assignment_mechanism"],
+                    actions,
+                ),
+            }
+            for sequence in range(assignment_count)
+        ]
+        result = {
+            "version": 1,
+            "pilot_id": args.pilot_id,
+            "seed": args.seed,
+            "assignment_mechanism": plan["assignment_mechanism"],
+            "assignments": assignments,
+            "reproducible": True,
+            "budget": {
+                "max_assignments": budget_limit,
+                "assignments_used": assignment_count,
+                "enforced": assignment_count <= budget_limit,
+                "exhausted": budget_limit <= stop_limit,
+            },
+            "monitoring_cadence": plan["monitoring_cadence"],
+            "stop": {
+                "criteria": plan["stop_criteria"],
+                "triggered": stop_limit <= budget_limit,
+                "at_assignment": stop_limit if stop_limit <= budget_limit else None,
+            },
+            "counts_as_causal_evidence": False,
+            "evidence_class": "mechanics_only",
+            "event_appended": False,
+        }
+    if args.json:
+        print(json.dumps(result, indent=2))
+    elif args.action == "authorize":
+        print(f"{result['pilot_id']}: pilot authorization recorded")
+    else:
+        print(
+            f"{result['pilot_id']}: dry-run generated "
+            f"{len(result['assignments'])} mechanics-only assignment(s)"
+        )
+    return 0
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    """C5 (ADR 0022 D4): emit a byte-stable immutable evaluation manifest for an
+    `--as-of` cutoff. `--pin PATH` persists it and refuses to overwrite an existing
+    manifest with different content (immutability; a new cutoff is a new version).
+
+    C5 (ADR 0022 D5): with `--estimator`, a gated `estimator_evaluation` section is
+    added. Every gate must pass to report an estimate; otherwise the output is a
+    neutral prediction audit / abstention that makes no causal/OPE/regret claim."""
+    if args.skill:
+        _validate_skill_name(args.skill)
+
+    def _load_json_arg(path: str | None, label: str) -> dict | None:
+        if not path:
+            return None
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise FeedbackError(f"{label} {path} could not be read as JSON: {exc}")
+        if not isinstance(data, dict):
+            raise FeedbackError(f"{label} {path} must be a JSON object")
+        return data
+
+    decision_profile = _load_json_arg(args.profile, "decision profile")
+    candidates = _load_json_arg(args.candidates, "candidates document")
+    if candidates is not None and decision_profile is None:
+        raise FeedbackError("--candidates requires --profile (the rule to apply)")
+    events = _read_events()
+    selected_skills = (
+        {args.skill}
+        if args.skill
+        else {
+            (event.get("skill") or {}).get("name")
+            for event in events
+            if (event.get("skill") or {}).get("name")
+        }
+    )
+    note_entries = []
+    for skill in sorted(selected_skills):
+        try:
+            note_entries.extend(_parse_entries(skill))
+        except (FeedbackError, OSError):
+            # An unavailable projection cannot authenticate a ledger observation;
+            # the manifest's event-orphan reconciliation will keep it ineligible.
+            continue
+    manifest = build_evaluation_manifest(
+        events,
+        as_of=args.as_of,
+        skills={args.skill} if args.skill else set(),
+        estimator=args.estimator,
+        target_policy=args.target_policy,
+        decision_profile=decision_profile,
+        candidates=candidates,
+        note_entries=note_entries,
+    )
+    serialized = json.dumps(manifest, indent=2, sort_keys=True)
+    if args.pin:
+        pin_path = Path(args.pin)
+        if pin_path.exists():
+            existing = pin_path.read_text(encoding="utf-8")
+            if existing != serialized:
+                raise FeedbackError(
+                    f"pinned manifest {args.pin} already exists with different "
+                    "content; an evaluation manifest is immutable -- use a new "
+                    "--as-of (a new version) rather than overwriting"
+                )
+        else:
+            pin_path.write_text(serialized, encoding="utf-8")
+    if args.json:
+        print(serialized)
+    else:
+        print(
+            f"evaluation manifest (v{manifest['manifest_version']}) as-of "
+            f"{manifest['as_of']}: version_key={manifest['version_key']} "
+            f"({manifest['population']['total_events']} events, "
+            f"digest={manifest['ledger_digest']['sha256'][:12]})"
+        )
+        section = manifest.get("estimator_evaluation")
+        if section:
+            if section["abstained"]:
+                print(
+                    f"  estimator {section['estimator']}: {section['mode']} "
+                    f"(unmet gates: {', '.join(section['unmet_gates'])})"
+                )
+            else:
+                estimate = section["estimate"]
+                print(
+                    f"  estimator {section['estimator']}: value={estimate['value']} "
+                    f"ci={estimate['confidence_interval']} "
+                    f"ess={section['support']['effective_sample_size']}"
+                )
+        profile = manifest.get("decision_profile")
+        if profile:
+            print(f"  decision_profile {profile['id']} v{profile['version']} frozen")
+        promotion = manifest.get("promotion_decision")
+        if promotion:
+            print(
+                f"  promotion: {promotion['decision']}"
+                + (f" -> {promotion['winner']}" if promotion["winner"] else "")
+            )
+    return 0
+
+
+def cmd_readiness(args: argparse.Namespace) -> int:
+    """C5 (ADR 0022 D3): report the prospective-evaluation readiness state machine.
+    `insufficient` gates carry a bounded acquisition task; `--abandon-gate` records
+    an operator abandon (with rationale)."""
+    if args.skill:
+        _validate_skill_name(args.skill)
+    if bool(args.abandon_gate) != bool(args.abandon_rationale):
+        raise FeedbackError(
+            "--abandon-gate and --abandon-rationale must be given together"
+        )
+    abandoned = {args.abandon_gate: args.abandon_rationale} if args.abandon_gate else {}
+    report = build_readiness(
+        _read_events(), {args.skill} if args.skill else set(), abandoned=abandoned
+    )
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(
+            f"readiness (policy v{report['policy_version']}): overall={report['overall']}"
+        )
+        for gate in report["gates"]:
+            line = (
+                f"  {gate['id']}: {gate['decision']} "
+                f"(measured={gate['calculation']['measured']}, "
+                f"required={gate['calculation']['required']})"
+            )
+            if "acquisition_task" in gate:
+                line += f" -> acquire {gate['acquisition_task']['id']}"
+            print(line)
+    return 0
 
 
 def print_help() -> None:
@@ -2876,6 +3514,93 @@ def main(argv: list[str]) -> int:
             _identity_options(p)
             p.add_argument("--json", action="store_true")
             return cmd_triage(p.parse_args(rest))
+        if head == "evaluate":
+            p = argparse.ArgumentParser(prog="skill-feedback evaluate")
+            p.add_argument("skill", nargs="?")
+            p.add_argument(
+                "--as-of",
+                dest="as_of",
+                required=True,
+                help="RFC3339 cutoff; only events at/before it enter the evaluand",
+            )
+            p.add_argument("--pin", help="persist the immutable manifest to PATH")
+            p.add_argument(
+                "--estimator",
+                choices=ESTIMATORS,
+                help="gate and run a predeclared estimator over the cutoff population",
+            )
+            p.add_argument(
+                "--target-policy",
+                dest="target_policy",
+                choices=TARGET_POLICIES,
+                default=DEFAULT_TARGET_POLICY,
+                help="the predeclared counterfactual target the estimator evaluates",
+            )
+            p.add_argument(
+                "--profile",
+                help="path to a versioned decision profile to freeze into the manifest",
+            )
+            p.add_argument(
+                "--candidates",
+                help="path to candidate metric bundles to score against --profile",
+            )
+            p.add_argument("--json", action="store_true")
+            return cmd_evaluate(p.parse_args(rest))
+        if head == "readiness":
+            p = argparse.ArgumentParser(prog="skill-feedback readiness")
+            p.add_argument("skill", nargs="?")
+            p.add_argument("--abandon-gate", dest="abandon_gate")
+            p.add_argument("--abandon-rationale", dest="abandon_rationale")
+            p.add_argument("--json", action="store_true")
+            return cmd_readiness(p.parse_args(rest))
+        if head == "pilot":
+            p = argparse.ArgumentParser(prog="skill-feedback pilot")
+            sub = p.add_subparsers(dest="action", required=True)
+            authorize_p = sub.add_parser(
+                "authorize", help="record a bounded maintainer-authorized pilot plan"
+            )
+            authorize_p.add_argument("skill")
+            authorize_p.add_argument(
+                "--payload",
+                required=True,
+                help="pilot authorization plan as JSON ('-' reads stdin)",
+            )
+            authorize_p.add_argument("--json", action="store_true")
+            dry_run_p = sub.add_parser(
+                "dry-run", help="validate deterministic pilot mechanics only"
+            )
+            dry_run_p.add_argument("skill")
+            dry_run_p.add_argument("pilot_id")
+            dry_run_p.add_argument("--seed", type=int, required=True)
+            dry_run_p.add_argument("--json", action="store_true")
+            return cmd_pilot(p.parse_args(rest))
+        if head == "decision":
+            p = argparse.ArgumentParser(prog="skill-feedback decision")
+            sub = p.add_subparsers(dest="action", required=True)
+            log_p = sub.add_parser(
+                "log", help="record a decision.logged policy context"
+            )
+            log_p.add_argument("skill")
+            log_p.add_argument(
+                "--payload",
+                required=True,
+                help="decision.logged payload as JSON ('-' reads stdin)",
+            )
+            log_p.add_argument("--invocation")
+            log_p.add_argument("--json", action="store_true")
+            out_p = sub.add_parser("outcome", help="attach a later decision.outcome")
+            out_p.add_argument("skill")
+            out_p.add_argument("decision_id")
+            out_p.add_argument("--outcome", required=True, choices=OUTCOMES)
+            out_p.add_argument("--oracle", required=True)
+            out_p.add_argument("--cost", type=float)
+            out_p.add_argument("--json", action="store_true")
+            strata_p = sub.add_parser(
+                "strata", help="report decision/outcome coverage by pre-action stratum"
+            )
+            strata_p.add_argument("skill", nargs="?")
+            strata_p.add_argument("--json", action="store_true")
+            return cmd_decision(p.parse_args(rest))
         if head == "verify":
             p = argparse.ArgumentParser(prog="skill-feedback verify")
             p.add_argument("skill")
@@ -2979,6 +3704,12 @@ def main(argv: list[str]) -> int:
                 action="append",
                 choices=GROUP_DIMENSIONS,
                 help="dimension to group by (repeatable; default: skill)",
+            )
+            p.add_argument(
+                "--allow-partial-descriptive",
+                action="store_true",
+                help="emit per-use rates for comparison-unready groups, "
+                "explicitly marked non-comparable (ADR 0020 D4)",
             )
             p.add_argument("--json", action="store_true")
             return cmd_stats(p.parse_args(rest))

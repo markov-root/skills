@@ -291,6 +291,87 @@ IMPACTS = ("low", "medium", "high", "unknown")
 
 OUTCOMES = ("success", "partial", "failure", "abandoned", "unknown")
 
+# --- C4 honest evidence classes (ADR 0021) ---------------------------------
+
+EVIDENCE_ELIGIBILITY_POLICY_VERSION = 1
+EVIDENCE_REGISTRY_VERSION = 1
+
+# Namespaces whose resolver and authority are declared (ADR 0021 D2). A
+# reference outside this set is retained for audit but never verified.
+EVIDENCE_NAMESPACES = ("test", "invocation", "commit", "task", "user")
+
+# Verification results a record-time resolver may report.
+EVIDENCE_RESULTS = ("verified", "unverified", "unavailable", "conflicting")
+
+ELIGIBILITY_USE_CASES = (
+    "preservation",
+    "recommendation",
+    "user_preference",
+    "outcome",
+    "failure_prediction",
+)
+
+# Use-case-specific source-tier eligibility (ADR 0021 D1). agent_judgment and
+# automation are raw-only: retained and counted, never eligible to score. There
+# is deliberately no single global "high quality" bit -- eligibility is decided
+# per downstream use.
+_EVIDENCE_ELIGIBILITY_MATRIX = {
+    "preservation": frozenset(
+        {"explicit_user", "observed_user", "independent_evaluation"}
+    ),
+    "recommendation": frozenset(
+        {"explicit_user", "observed_user", "independent_evaluation"}
+    ),
+    "user_preference": frozenset({"explicit_user", "observed_user"}),
+    "outcome": frozenset({"explicit_user", "observed_user", "independent_evaluation"}),
+    "failure_prediction": frozenset({"deterministic"}),
+}
+
+
+def source_eligible_for(source: str | None, use_case: str) -> bool:
+    """Whether a source tier may ever contribute to a downstream use-case
+    (ADR 0021 D1). Eligibility for an individual observation additionally
+    requires verified evidence and the use-case condition, enforced in the read
+    model -- this predicate is the source-tier gate only."""
+    return source in _EVIDENCE_ELIGIBILITY_MATRIX.get(use_case, frozenset())
+
+
+# --- C5 prospective evaluation gate (ADR 0022) -----------------------------
+
+DECISION_SCHEMA_VERSION = 1
+
+# How the chosen action was assigned. Only a randomized/interleaved/shadow
+# assignment can create the overlap an OPE/causal estimator needs; a
+# deterministic choice provides no counterfactual (ADR 0022 D1/D5).
+ASSIGNMENT_MECHANISMS = (
+    "deterministic",
+    "randomized",
+    "interleaved",
+    "shadow",
+    "unknown",
+)
+
+PILOT_REQUIRED_FIELDS = frozenset(
+    {
+        "population",
+        "exclusions",
+        "assignment_mechanism",
+        "budget",
+        "monitoring_cadence",
+        "stop_criteria",
+        "owner",
+        "kill_switch",
+        "rollback",
+        "analysis_plan",
+    }
+)
+
+# A later-attached outcome carries ONLY these fields (+ optional cost), so it
+# structurally cannot synthesize a candidate set / stratum / propensity into the
+# frozen decision.logged policy context (ADR 0022 D1 anti-backfill invariant).
+_REQUIRED_DECISION_OUTCOME_FIELDS = frozenset({"decision_id", "outcome", "oracle"})
+
+
 DELIVERY_STATES = ("pending", "source", "delivered")
 
 ACTOR_TYPES = ("agent", "user", "automation", "system")
@@ -304,6 +385,11 @@ EVENT_TYPES = (
     "verification.recorded",
     "preservation.declared",
     "privacy.review.acknowledged",
+    "activation.receipt",
+    "activation.closeout",
+    "decision.logged",
+    "decision.outcome",
+    "pilot.authorized",
 )
 
 EVENT_SCHEMA_VERSION = 2
@@ -448,6 +534,31 @@ def _validate_event(event: dict) -> None:
             "feedback_id",
             "test",
         },
+        "activation.receipt": {
+            "receipt_id",
+            "capture_mechanism",
+            "decision_episode_id",
+        },
+        "activation.closeout": {
+            "receipt_id",
+            "closeout",
+            "feedback_id",
+        },
+        "decision.logged": {
+            "decision_id",
+            "decision_episode_id",
+            "task_stratum",
+            "difficulty_proxy",
+            "candidate_actions",
+            "chosen_action",
+            "eligibility_mask",
+            "logging_policy",
+            "assignment_mechanism",
+            "chosen_action_probability",
+            "backend",
+        },
+        "decision.outcome": set(_REQUIRED_DECISION_OUTCOME_FIELDS),
+        "pilot.authorized": {"pilot_id", *PILOT_REQUIRED_FIELDS},
         "privacy.review.acknowledged": {
             "feedback_id",
             "entry_sha256",
@@ -529,6 +640,194 @@ def _validate_event(event: dict) -> None:
             raise FeedbackError("verification.recorded observed_result is invalid")
         if payload["verification_state"] not in ("verified", "unverified"):
             raise FeedbackError("verification.recorded verification_state is invalid")
+    elif event_type == "activation.receipt":
+        # C3 (ADR 0020 D1): content-free harness activation receipt.
+        if payload["capture_mechanism"] not in (
+            "automatic",
+            "manual-start",
+            "note-only",
+            "unknown",
+        ):
+            raise FeedbackError("activation.receipt capture_mechanism is invalid")
+    elif event_type == "activation.closeout":
+        if payload["closeout"] not in (
+            "feedback_id",
+            "no_noteworthy_feedback",
+            "aborted",
+            "unable_to_report",
+        ):
+            raise FeedbackError("activation.closeout closeout is invalid")
+    elif event_type == "decision.logged":
+        # C5 (ADR 0022 D1): a prospective decision record freezing the full policy
+        # context at decision time. Outcome/cost are attached LATER via a separate
+        # decision.outcome event, never backfilled into this policy context.
+        candidates = payload["candidate_actions"]
+        if not isinstance(candidates, list) or not candidates:
+            raise FeedbackError(
+                "decision.logged candidate_actions must be a non-empty list"
+            )
+        if not all(isinstance(action, str) and action for action in candidates):
+            raise FeedbackError(
+                "decision.logged candidate_actions must be non-empty strings"
+            )
+        if len(set(candidates)) != len(candidates):
+            raise FeedbackError("decision.logged candidate_actions must be unique")
+        chosen = payload["chosen_action"]
+        if chosen not in candidates:
+            raise FeedbackError(
+                "decision.logged chosen_action must be one of candidate_actions"
+            )
+        mask = payload["eligibility_mask"]
+        if not isinstance(mask, dict) or set(mask) != set(candidates):
+            raise FeedbackError(
+                "decision.logged eligibility_mask must cover exactly the candidate actions"
+            )
+        if not all(isinstance(value, bool) for value in mask.values()):
+            raise FeedbackError(
+                "decision.logged eligibility_mask values must be booleans"
+            )
+        if not mask.get(chosen):
+            raise FeedbackError(
+                "decision.logged chosen_action must be eligible in the eligibility_mask"
+            )
+        if not payload.get("task_stratum"):
+            raise FeedbackError("decision.logged task_stratum (pre-action) is required")
+        mechanism = payload["assignment_mechanism"]
+        if mechanism not in ASSIGNMENT_MECHANISMS:
+            raise FeedbackError("decision.logged assignment_mechanism is invalid")
+        policy = payload["logging_policy"]
+        if (
+            not isinstance(policy, dict)
+            or not policy.get("id")
+            or not isinstance(policy.get("version"), int)
+            or isinstance(policy.get("version"), bool)
+        ):
+            raise FeedbackError(
+                "decision.logged logging_policy must carry a non-empty id and an "
+                "integer version"
+            )
+        probability = payload["chosen_action_probability"]
+        if probability == "unknown":
+            # An unknown propensity is only admissible when the mechanism itself is
+            # unknown -- a stated mechanism must state a reconcilable probability.
+            if mechanism != "unknown":
+                raise FeedbackError(
+                    "decision.logged chosen_action_probability 'unknown' requires "
+                    "assignment_mechanism 'unknown'"
+                )
+        else:
+            if (
+                not isinstance(probability, (int, float))
+                or isinstance(probability, bool)
+                or not (0 < probability <= 1)
+            ):
+                raise FeedbackError(
+                    "decision.logged chosen_action_probability must be in (0, 1] or "
+                    "'unknown'"
+                )
+            if mechanism == "deterministic" and probability != 1:
+                raise FeedbackError(
+                    "decision.logged deterministic assignment requires probability 1"
+                )
+            if (
+                mechanism in ("randomized", "interleaved", "shadow")
+                and probability >= 1
+            ):
+                raise FeedbackError(
+                    "decision.logged non-deterministic assignment requires "
+                    "probability < 1 (overlap)"
+                )
+    elif event_type == "decision.outcome":
+        # C5 (ADR 0022 D1): a later-attached outcome carrying NO policy context, so
+        # it structurally cannot synthesize a candidate set, stratum, or propensity.
+        if payload["outcome"] not in OUTCOMES:
+            raise FeedbackError("decision.outcome outcome is invalid")
+        if not isinstance(payload["oracle"], str) or not payload["oracle"]:
+            raise FeedbackError("decision.outcome oracle must be a non-empty string")
+        cost = payload.get("cost")
+        if cost is not None and (
+            not isinstance(cost, (int, float)) or isinstance(cost, bool) or cost < 0
+        ):
+            raise FeedbackError("decision.outcome cost must be null or non-negative")
+    elif event_type == "pilot.authorized":
+        if set(payload) != required_payload:
+            raise FeedbackError(
+                "pilot.authorized payload must contain exactly its plan fields"
+            )
+        if not isinstance(payload["pilot_id"], str) or not payload["pilot_id"]:
+            raise FeedbackError("pilot.authorized pilot_id must be a non-empty string")
+        if payload["assignment_mechanism"] not in ASSIGNMENT_MECHANISMS:
+            raise FeedbackError("pilot.authorized assignment_mechanism is invalid")
+        population = payload["population"]
+        if not isinstance(population, dict) or not population:
+            raise FeedbackError(
+                "pilot.authorized population must be a non-empty object"
+            )
+        actions = population.get("candidate_actions", ["control", "treatment"])
+        if (
+            not isinstance(actions, list)
+            or len(actions) < 2
+            or not all(isinstance(action, str) and action for action in actions)
+            or len(set(actions)) != len(actions)
+        ):
+            raise FeedbackError(
+                "pilot.authorized population.candidate_actions must be at least two "
+                "unique non-empty strings"
+            )
+        exclusions = payload["exclusions"]
+        if not isinstance(exclusions, list) or not all(
+            isinstance(item, str) and item for item in exclusions
+        ):
+            raise FeedbackError(
+                "pilot.authorized exclusions must be a list of non-empty strings"
+            )
+        budget = payload["budget"]
+        if not isinstance(budget, dict):
+            raise FeedbackError("pilot.authorized budget must be an object")
+        max_assignments = budget.get("max_assignments")
+        if (
+            not isinstance(max_assignments, int)
+            or isinstance(max_assignments, bool)
+            or max_assignments < 1
+        ):
+            raise FeedbackError(
+                "pilot.authorized budget.max_assignments must be a positive integer"
+            )
+        max_cost = budget.get("max_acquisition_cost")
+        if max_cost is not None and (
+            not isinstance(max_cost, (int, float))
+            or isinstance(max_cost, bool)
+            or max_cost < 0
+        ):
+            raise FeedbackError(
+                "pilot.authorized budget.max_acquisition_cost must be non-negative"
+            )
+        cadence = payload["monitoring_cadence"]
+        if not isinstance(cadence, dict):
+            raise FeedbackError("pilot.authorized monitoring_cadence must be an object")
+        every = cadence.get("every_assignments")
+        if not isinstance(every, int) or isinstance(every, bool) or every < 1:
+            raise FeedbackError(
+                "pilot.authorized monitoring_cadence.every_assignments must be a "
+                "positive integer"
+            )
+        stop = payload["stop_criteria"]
+        if not isinstance(stop, dict):
+            raise FeedbackError("pilot.authorized stop_criteria must be an object")
+        stop_after = stop.get("max_assignments")
+        if (
+            not isinstance(stop_after, int)
+            or isinstance(stop_after, bool)
+            or stop_after < 1
+        ):
+            raise FeedbackError(
+                "pilot.authorized stop_criteria.max_assignments must be a positive integer"
+            )
+        for field in ("owner", "kill_switch", "rollback", "analysis_plan"):
+            if not isinstance(payload[field], str) or not payload[field]:
+                raise FeedbackError(
+                    f"pilot.authorized {field} must be a non-empty string"
+                )
     elif event_type == "privacy.review.acknowledged":
         if set(payload) != required_payload:
             raise FeedbackError(

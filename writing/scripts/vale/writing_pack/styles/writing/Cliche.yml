@@ -1,0 +1,59 @@
+extends: existence
+message: "review: '%s' is a cliché, stock phrase, or corporate filler — usually a placeholder standing in for a specific claim. This is a review note, not a verdict — keep it only if it is exact and earned."
+level: warning
+ignorecase: true
+scope: sentence
+tokens:
+  # seed set (task 0023). Entries the pack already covers elsewhere are not
+  # repeated here (TierA: delve, tapestry, testament to, at the end of the day,
+  # it's worth noting, in today's fast-paced world, realm, pivotal, unlock the
+  # potential, game-changing; TierB: in conclusion) — duplicating them would
+  # double-fire every occurrence.
+  - "\\bnavigating the landscape\\b"
+  - "\\bplays a vital role\\b"
+  - "\\bwhen it comes to\\b"
+  - "\\bneedle in a haystack\\b"
+  - "\\bthe fact of the matter\\b"
+  - "\\blast but not least\\b"
+  - "\\bfirst and foremost\\b"
+  - "\\bparadigm shifts?\\b"
+  - "\\bgame[- ]chang(?:er|ers)\\b"
+  - "\\blow-hanging fruit\\b"
+  - "\\bmov(?:e|es|ed|ing) the needle\\b"
+  # corporate filler
+  - "\\bthink outside the box\\b"
+  - "\\bcircl(?:e|es|ed|ing) back\\b"
+  - "\\btouch(?:es|ed|ing)? base\\b"
+  - "\\bboil the ocean\\b"
+  - "\\bhit the ground running\\b"
+  - "\\bgoing forwards?\\b"
+  - "\\bsynerg\\w*\\b"
+  - "\\bbest-in-class\\b"
+  - "\\bworld-class\\b"
+  - "\\bmission-critical\\b"
+  - "\\bwin-win\\b"
+  - "\\bcore competenc(?:y|ies)\\b"
+  - "\\bactionable insights?\\b"
+  - "\\bkey takeaways?\\b"
+  # classic clichés
+  - "\\btake it to the next level\\b"
+  - "\\bpush(?:es|ed|ing)? the envelope\\b"
+  - "\\brais(?:e|es|ed|ing) the bar\\b"
+  - "\\bat the forefront of\\b"
+  - "\\bin a nutshell\\b"
+  - "\\bneedless to say\\b"
+  - "\\bit goes without saying\\b"
+  - "\\bfew and far between\\b"
+  - "\\beach and every\\b"
+  - "\\bonly time will tell\\b"
+  - "\\btip of the iceberg\\b"
+  - "\\bthe elephant in the room\\b"
+  - "\\bleave no stone unturned\\b"
+  - "\\bback to the drawing board\\b"
+  - "\\ba double-edged sword\\b"
+  - "\\blevel the playing field\\b"
+  - "\\bat a crossroads\\b"
+  - "\\bwhen all is said and done\\b"
+  - "\\bcut to the chase\\b"
+  - "\\ba perfect storm\\b"
+  - "\\breinvent(?:ed|ing)? the wheel\\b"

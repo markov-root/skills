@@ -175,6 +175,30 @@ The discipline is to **pick one and apply consistently** — heterogeneous histo
 
 Force-pushing to `main` is a destructive operation. Many teams enforce this via branch protection rules — and should.
 
+## Ignoring, Untracking, and History — What Each Tool Actually Does
+
+These operations have different, commonly confused effects. Choosing wrong either leaks content or
+falsely suggests content is gone:
+
+| Operation | Effect | Does **not** do |
+| --- | --- | --- |
+| `.gitignore` entry | Stops **untracked** files from being added by ordinary future `git add` operations (a forced add bypasses it) | Untrack an already-tracked file; remove it from history |
+| `git rm --cached <path>` | Untracks the path (removed at next commit) while keeping the working file | Remove past commits that contained it |
+| `git rm <path>` + commit | Removes the file from the current tree | Remove history — earlier commits still contain it |
+| Coordinated history rewrite | Rewrites commits on the rewritten refs; existing clones, forks, and backups keep the old history until each one re-synchronizes or is replaced | Automatically update every clone, fork, or backup; make an exposed secret safe — **rotate/revoke first** |
+
+**Discipline:**
+
+- Ignoring a file that is already tracked is a silent no-op for that file: add the `.gitignore`
+  entry **and** `git rm --cached` it, then verify with `git ls-files`.
+- Everything ever committed remains recoverable from history until history itself is rewritten (a
+  coordinated, destructive operation). Treat "I deleted it" as "I deleted it from the current tree."
+- An exposed secret (credential, token, key) committed by accident requires rotation first; other
+  sensitive material is handled per its policy. History reduction is secondary and coordinated (see
+  the hygiene section in [documentation structure](documentation-structure.md)).
+- What Git tracks is also not what a release ships: exports are declared separately (see
+  [release engineering](release-engineering.md)).
+
 ---
 
 ## Reading History — Tools Beyond `git log`
@@ -422,6 +446,7 @@ Both work. Choose deliberately; document the choice.
 | **Big PRs reviewed in 90 seconds**                                      | The review serves the deploy queue, not the code                                 |
 | **One commit per PR by default ("squash everything")** without thinking | Sometimes the commit-level history is the value                                  |
 | **Tags moved or deleted**                                               | Cross-references break                                                           |
+| **Adding a `.gitignore` entry for an already-tracked file**              | The file stays tracked and its history intact — the ignore is a silent no-op     |
 | **`main` is not always deployable**                                     | The deploy story becomes "wait for the right commit" instead of "deploy `main`"  |
 | **History rewritten "for cleanliness" after the fact**                  | Outstanding PRs against the old history break                                    |
 | **Different commit conventions across the org**                         | Tooling needs to handle all of them; readers lose intuition                      |

@@ -23,6 +23,14 @@
       "patterns": ["tool description", "tool-use prompt", "delegation prompt", "handoff prompt", "subagent prompt", "multi-agent", "agent orchestration"]
     },
     {
+      "id": "prompt_security",
+      "task": "Prompt injection, jailbreaks, tool-output poisoning, exfiltration controls, and prompt-security regressions",
+      "required": ["prompt-security.md"],
+      "optional": ["context-engineering.md", "agentic-tools.md", "rag-retrieval.md", "structured-output.md", "checklist.md"],
+      "delegate": null,
+      "patterns": ["prompt injection", "indirect prompt injection", "jailbreak", "jailbreaking", "tool-output-poisoning", "tool-output poisoning", "tool output poisoning", "exfiltration", "data exfiltration", "exfiltrate", "leak secrets", "markdown injection", "suspicious url"]
+    },
+    {
       "id": "llm_judge",
       "task": "LLM-as-judge prompts and scoring rubrics",
       "required": ["llm-as-judge.md", "checklist.md"],

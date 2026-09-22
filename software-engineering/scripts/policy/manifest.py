@@ -1,8 +1,9 @@
-"""Strict, side-effect-free loading of ``engineering.yaml`` version 1."""
+"""Strict, side-effect-free loading of versioned ``engineering.yaml`` policies."""
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -14,6 +15,20 @@ from pathspec.patterns.gitwildmatch import GitWildMatchPatternError
 
 from ..resources import schema_path as bundled_schema_path
 from .documents import HANDOFF_STATES, DocumentContractPolicy
+
+SUPPORTED_MANIFEST_VERSION = 2
+
+_PROJECT_ID_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+_RECORD_ROLE_FOLDERS = {
+    "task": "tasks",
+    "adr": "adr",
+    "audit": "audits",
+    "research": "research",
+    "lesson": "lessons",
+    "handoff": "handoffs",
+    "plan": "plans",
+}
+_RECORD_ID_GLOB = "[0-9][0-9][0-9][0-9]-*.md"
 
 
 @dataclass(frozen=True)
@@ -166,6 +181,52 @@ class Manifest:
     raw: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class DocumentProjectScope:
+    """One v2 project's resolved roots and normalized record policy."""
+
+    id: str
+    root: Path
+    docs_root: Path
+    currency: DocsCurrencyPolicy
+    task_inventory: TaskInventoryPolicy
+
+
+@dataclass(frozen=True)
+class DocumentProjectRegistry:
+    """The ordered, immutable v2 project registry."""
+
+    projects: tuple[DocumentProjectScope, ...]
+
+    def select(self, project_id: str) -> DocumentProjectScope:
+        for project in self.projects:
+            if project.id == project_id:
+                return project
+        raise ManifestError([f"$.docs.currency.projects: unknown project id {project_id!r}"])
+
+
+@dataclass(frozen=True)
+class SizeGateThresholds:
+    """Per-project-tunable warning thresholds for the advisory task-size gate (ADR 0025 §4/§10).
+
+    These bound only advisory oversize smells; they never hard-block. Defaults are conservative
+    starting points that a project is expected to tune before relying on them.
+    """
+
+    max_acceptance_criteria: int = 7
+    max_touched_dirs: int = 4
+
+
+@dataclass(frozen=True)
+class ManifestV2(Manifest):
+    """Manifest v2 data kept beside, rather than inside, the legacy model."""
+
+    document_projects: DocumentProjectRegistry
+    agent_scheduling: bool = False
+    # A frozen (immutable) instance is a safe shared default; no default_factory needed.
+    size_gate: SizeGateThresholds = SizeGateThresholds()
+
+
 class ManifestError(ValueError):
     """An invalid policy, with stable path-oriented diagnostics."""
 
@@ -240,8 +301,9 @@ def _valid_relative_path(value: object, *, glob: bool = False) -> bool:
     return True
 
 
-def _schema_path() -> Path:
-    return bundled_schema_path("engineering.schema.json")
+def _schema_path(version: int = 1) -> Path:
+    filename = "engineering-v2.schema.json" if version == 2 else "engineering.schema.json"
+    return bundled_schema_path(filename)
 
 
 def _schema_issues(
@@ -265,6 +327,318 @@ def _schema_issues(
     return issues
 
 
+def _is_within(path: Path, parent: Path, *, strict: bool = False) -> bool:
+    if strict and path == parent:
+        return False
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def _same_existing_path(left: Path, right: Path) -> bool:
+    try:
+        return left.samefile(right)
+    except OSError:
+        return False
+
+
+def _has_symlink_component(path: Path, boundary: Path) -> bool:
+    try:
+        relative = path.relative_to(boundary)
+    except ValueError:
+        return True
+    candidate = boundary
+    for part in relative.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            return True
+    return False
+
+
+def _normalized_project_value(repo_root: Path, docs_root: Path, value: str) -> str:
+    docs_relative = docs_root.relative_to(repo_root).as_posix()
+    return (PurePosixPath(docs_relative) / PurePosixPath(value)).as_posix()
+
+
+def _planning_issues(planning: dict[str, Any], path: str) -> list[str]:
+    issues: list[str] = []
+    fields_value = planning.get("fields", {})
+    fields = fields_value if isinstance(fields_value, dict) else {}
+    for name, spec in fields.items():
+        if not isinstance(spec, dict):
+            continue
+        values = spec.get("values", [])
+        order = spec.get("order", [])
+        if order and set(order) != set(values):
+            issues.append(
+                f"{path}.fields.{name}.order: must contain every allowed value exactly once"
+            )
+    for index, name in enumerate(planning.get("default_order", [])):
+        spec = fields.get(name)
+        if not isinstance(spec, dict):
+            issues.append(f"{path}.default_order[{index}]: unknown planning field {name!r}")
+        elif not spec.get("order"):
+            issues.append(
+                f"{path}.default_order[{index}]: planning field {name!r} has no explicit order"
+            )
+    return issues
+
+
+def _v2_project_issues(loaded: dict[str, Any], repo_root: Path) -> list[str]:
+    currency = loaded["docs"]["currency"]
+    projects = currency["projects"]
+    issues: list[str] = []
+    ids: set[str] = set()
+    resolved_roots: list[tuple[int, Path]] = []
+    resolved_docs_roots: list[tuple[int, Path]] = []
+
+    for role_index, role in enumerate(currency.get("roles", ())):
+        if role.get("name") in _RECORD_ROLE_FOLDERS:
+            issues.append(
+                f"$.docs.currency.roles[{role_index}].name: record roles must be project-scoped"
+            )
+
+    for role_name, spec in currency.get("role_defaults", {}).items():
+        contract = spec.get("contract", {})
+        if contract.get("role") != role_name:
+            issues.append(
+                f"$.docs.currency.role_defaults.{role_name}.contract.role: "
+                "must equal the enclosing role name"
+            )
+        if bool(spec.get("states")) != bool(spec.get("current_state")):
+            issues.append(
+                f"$.docs.currency.role_defaults.{role_name}: "
+                "states and current_state must be declared together"
+            )
+        elif spec.get("current_state") and spec["current_state"] not in spec["states"]:
+            issues.append(
+                f"$.docs.currency.role_defaults.{role_name}.current_state: "
+                "must be one of the declared states"
+            )
+        if role_name == "handoff":
+            if tuple(spec.get("states", ())) != HANDOFF_STATES:
+                issues.append(
+                    "$.docs.currency.role_defaults.handoff.states: handoff contract requires "
+                    f"{list(HANDOFF_STATES)!r}"
+                )
+            if spec.get("current_state") != "current":
+                issues.append(
+                    "$.docs.currency.role_defaults.handoff.current_state: "
+                    "handoff contract requires 'current'"
+                )
+
+    for index, project in enumerate(projects):
+        project_path = f"$.docs.currency.projects[{index}]"
+        project_id = project["id"]
+        folded_id = project_id.casefold()
+        if not _PROJECT_ID_PATTERN.fullmatch(project_id):
+            issues.append(f"{project_path}.id: expected a lowercase ASCII slug")
+        if folded_id in ids:
+            issues.append(f"{project_path}.id: duplicate project id {project_id!r}")
+        ids.add(folded_id)
+
+        root_value = project["root"]
+        docs_root_value = project.get("docs_root", "dev/docs")
+        if not _valid_relative_path(root_value):
+            issues.append(f"{project_path}.root: invalid repository-relative path")
+            continue
+        if not _valid_relative_path(docs_root_value):
+            issues.append(f"{project_path}.docs_root: invalid project-relative path")
+            continue
+
+        lexical_root = repo_root / root_value
+        if _has_symlink_component(lexical_root, repo_root):
+            issues.append(f"{project_path}.root: project root must not be a symlink")
+            continue
+        if not lexical_root.is_dir():
+            issues.append(f"{project_path}.root: project root must be an existing directory")
+            continue
+        resolved_root = lexical_root.resolve()
+        if not _is_within(resolved_root, repo_root, strict=True):
+            issues.append(f"{project_path}.root: project root must resolve inside repository root")
+            continue
+
+        lexical_docs_root = lexical_root / docs_root_value
+        if _has_symlink_component(lexical_docs_root, lexical_root):
+            issues.append(f"{project_path}.docs_root: docs_root must not be a symlink")
+            continue
+        if not lexical_docs_root.is_dir():
+            issues.append(f"{project_path}.docs_root: docs_root must be an existing directory")
+            continue
+        resolved_docs_root = lexical_docs_root.resolve()
+        if not _is_within(resolved_docs_root, resolved_root, strict=True):
+            issues.append(f"{project_path}.docs_root: docs_root must resolve inside project root")
+            continue
+
+        resolved_roots.append((index, resolved_root))
+        resolved_docs_roots.append((index, resolved_docs_root))
+
+        for pointer_index, pointer in enumerate(project.get("required_current_truth", ())):
+            if not _valid_relative_path(pointer):
+                issues.append(
+                    f"{project_path}.required_current_truth[{pointer_index}]: "
+                    "invalid project-relative path"
+                )
+        evidence = project.get("done_task_evidence", {})
+        for include_index, pattern in enumerate(evidence.get("include", ())):
+            if not _valid_relative_path(pattern, glob=True):
+                issues.append(
+                    f"{project_path}.done_task_evidence.include[{include_index}]: "
+                    "invalid project-relative glob"
+                )
+        inventory = project.get("task_inventory", {})
+        for field in ("include", "handoffs", "decisions"):
+            for pattern_index, pattern in enumerate(inventory.get(field, ())):
+                if not _valid_relative_path(pattern, glob=True):
+                    issues.append(
+                        f"{project_path}.task_inventory.{field}[{pattern_index}]: "
+                        "invalid project-relative glob"
+                    )
+        planning = inventory.get("planning")
+        if isinstance(planning, dict):
+            issues.extend(_planning_issues(planning, f"{project_path}.task_inventory.planning"))
+
+    for offset, (left_index, left) in enumerate(resolved_roots):
+        for right_index, right in resolved_roots[offset + 1 :]:
+            if (
+                _same_existing_path(left, right)
+                or _is_within(left, right)
+                or _is_within(right, left)
+            ):
+                issues.append(
+                    f"$.docs.currency.projects[{right_index}].root: project roots must not be "
+                    f"equal or nested (overlaps project {left_index})"
+                )
+    for offset, (left_index, left) in enumerate(resolved_docs_roots):
+        for right_index, right in resolved_docs_roots[offset + 1 :]:
+            if (
+                _same_existing_path(left, right)
+                or _is_within(left, right)
+                or _is_within(right, left)
+            ):
+                issues.append(
+                    f"$.docs.currency.projects[{right_index}].docs_root: docs roots must not be "
+                    f"equal or nested (overlaps project {left_index})"
+                )
+    return issues
+
+
+def _planning_policy(value: dict[str, Any] | None) -> TaskPlanningPolicy | None:
+    if not value:
+        return None
+    return TaskPlanningPolicy(
+        fields={
+            name: TaskPlanningFieldPolicy(
+                values=tuple(spec["values"]), order=tuple(spec.get("order", ()))
+            )
+            for name, spec in value.get("fields", {}).items()
+        },
+        default_order=tuple(value.get("default_order", ())),
+    )
+
+
+def _v2_project_registry(loaded: dict[str, Any], repo_root: Path) -> DocumentProjectRegistry:
+    currency = loaded["docs"]["currency"]
+    role_defaults = currency.get("role_defaults", {})
+    scopes: list[DocumentProjectScope] = []
+    for project in currency["projects"]:
+        root = (repo_root / project["root"]).resolve()
+        docs_root = (root / project.get("docs_root", "dev/docs")).resolve()
+        roles: list[DocumentRolePolicy] = []
+        for role_name in project["roles"]:
+            folder = _RECORD_ROLE_FOLDERS[role_name]
+            role_default = role_defaults.get(role_name, {})
+            contract_value = role_default.get(
+                "contract",
+                {
+                    "version": 1,
+                    "role": role_name,
+                    "carrier": "frontmatter",
+                    "metadata_key": "engineering_document",
+                },
+            )
+            states = tuple(role_default.get("states", ()))
+            current_state = role_default.get("current_state")
+            if role_name == "handoff" and not role_default:
+                states = HANDOFF_STATES
+                current_state = "current"
+            roles.append(
+                DocumentRolePolicy(
+                    name=role_name,
+                    include=(
+                        _normalized_project_value(
+                            repo_root, docs_root, f"{folder}/{_RECORD_ID_GLOB}"
+                        ),
+                    ),
+                    index=_normalized_project_value(repo_root, docs_root, f"{folder}/README.md"),
+                    id_prefix_digits=role_default.get("id_prefix_digits", 4),
+                    states=states,
+                    current_state=current_state,
+                    contract=DocumentContractPolicy(**contract_value),
+                )
+            )
+
+        required_truth = project.get("required_current_truth")
+        if required_truth is None:
+            required_truth = [
+                f"{_RECORD_ROLE_FOLDERS[name]}/README.md" for name in project["roles"]
+            ]
+        evidence_value = project.get("done_task_evidence")
+        if evidence_value is None and "task" in project["roles"]:
+            evidence_value = {
+                "include": [f"tasks/{_RECORD_ID_GLOB}"],
+                "headings": ["Completion evidence", "Evidence"],
+            }
+        evidence = (
+            DoneTaskEvidencePolicy(
+                include=tuple(
+                    _normalized_project_value(repo_root, docs_root, item)
+                    for item in evidence_value["include"]
+                ),
+                headings=tuple(evidence_value["headings"]),
+            )
+            if evidence_value
+            else None
+        )
+        inventory_value = project.get("task_inventory", {})
+        default_include = ["tasks/*.md"] if "task" in project["roles"] else []
+        default_handoffs = ["handoffs/*.md"] if "handoff" in project["roles"] else []
+        default_decisions = ["adr/*.md"] if "adr" in project["roles"] else []
+        scopes.append(
+            DocumentProjectScope(
+                id=project["id"],
+                root=root,
+                docs_root=docs_root,
+                currency=DocsCurrencyPolicy(
+                    roles=tuple(roles),
+                    required_current_truth=tuple(
+                        _normalized_project_value(repo_root, docs_root, item)
+                        for item in required_truth
+                    ),
+                    done_task_evidence=evidence,
+                ),
+                task_inventory=TaskInventoryPolicy(
+                    include=tuple(
+                        _normalized_project_value(repo_root, docs_root, item)
+                        for item in inventory_value.get("include", default_include)
+                    ),
+                    handoffs=tuple(
+                        _normalized_project_value(repo_root, docs_root, item)
+                        for item in inventory_value.get("handoffs", default_handoffs)
+                    ),
+                    decisions=tuple(
+                        _normalized_project_value(repo_root, docs_root, item)
+                        for item in inventory_value.get("decisions", default_decisions)
+                    ),
+                    planning=_planning_policy(inventory_value.get("planning")),
+                ),
+            )
+        )
+    return DocumentProjectRegistry(tuple(scopes))
+
+
 def load_manifest(path: str | Path, *, schema_path: str | Path | None = None) -> Manifest:
     """Load and validate a manifest without executing commands or changing files."""
     manifest_path = Path(path).resolve()
@@ -275,13 +649,33 @@ def load_manifest(path: str | Path, *, schema_path: str | Path | None = None) ->
     if not isinstance(loaded, dict):
         raise ManifestError(["$: expected a mapping"])
 
+    version = loaded.get("version")
+    if (
+        isinstance(version, int)
+        and not isinstance(version, bool)
+        and version > SUPPORTED_MANIFEST_VERSION
+    ):
+        raise ManifestError(
+            [
+                (
+                    f"$.version: unsupported manifest version {version}; "
+                    f"maximum supported version is {SUPPORTED_MANIFEST_VERSION}"
+                )
+            ]
+        )
+    selected_version = version if version in (1, 2) else 1
+
     try:
-        schema = json.loads(Path(schema_path or _schema_path()).read_text(encoding="utf-8"))
+        schema = json.loads(
+            Path(schema_path or _schema_path(selected_version)).read_text(encoding="utf-8")
+        )
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"cannot load bundled engineering schema: {exc}") from exc
 
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
     issues = _schema_issues(validator, loaded)
+    if selected_version == 2 and not issues:
+        issues.extend(_v2_project_issues(loaded, manifest_path.parent))
     for index, document in enumerate(loaded.get("project", {}).get("documents", [])):
         if not _valid_relative_path(document):
             issues.append(f"$.project.documents[{index}]: invalid repository-relative path")
@@ -485,6 +879,105 @@ def load_manifest(path: str | Path, *, schema_path: str | Path | None = None) ->
         name: Profile(name, tuple(spec["checks"]))
         for name, spec in loaded.get("profiles", {}).items()
     }
+    if loaded["version"] == 2:
+        global_roles = tuple(
+            DocumentRolePolicy(
+                name=item["name"],
+                include=tuple(item["include"]),
+                index=item["index"],
+                id_prefix_digits=item["id_prefix_digits"],
+                contract=(
+                    DocumentContractPolicy(**item["contract"]) if "contract" in item else None
+                ),
+                states=tuple(item.get("states", ())),
+                current_state=item.get("current_state"),
+            )
+            for item in currency.get("roles", ())
+        )
+        return ManifestV2(
+            path=manifest_path,
+            version=loaded["version"],
+            project=ProjectPolicy(
+                risk=loaded["project"]["risk"],
+                core_outcome=loaded["project"]["core_outcome"],
+                documents=tuple(loaded["project"].get("documents", ())),
+            ),
+            paths=PathPolicy(
+                **{key: tuple(value) for key, value in loaded.get("paths", {}).items()}
+            ),
+            checks=checks,
+            profiles=profiles,
+            classifiers={key: tuple(value) for key, value in loaded.get("classifiers", {}).items()},
+            fitness=tuple(
+                FitnessDeclaration(
+                    name=item["name"],
+                    check=item["check"],
+                    rationale=item["rationale"],
+                    references=tuple(item.get("references", ())),
+                    applies_to=tuple(item.get("applies_to", ())),
+                    exceptions=tuple(
+                        FitnessException(**value) for value in item.get("exceptions", ())
+                    ),
+                )
+                for item in loaded.get("fitness", ())
+            ),
+            generated=tuple(
+                GeneratedPolicy(
+                    name=item["name"],
+                    sources=tuple(item["sources"]),
+                    outputs=tuple(item["outputs"]),
+                    command=tuple(item["command"]),
+                    cwd=item.get("cwd", "."),
+                )
+                for item in loaded.get("generated", ())
+            ),
+            docs=DocsPolicy(
+                include=tuple(loaded.get("docs", {}).get("include", ())),
+                required_headings=tuple(loaded.get("docs", {}).get("required_headings", ())),
+                forbid_legacy_links=loaded.get("docs", {}).get("forbid_legacy_links", False),
+                currency=DocsCurrencyPolicy(roles=global_roles),
+            ),
+            # V2 has no repository-wide task inventory. The empty value is deliberately
+            # non-scanning; v2 consumers must select a DocumentProjectScope instead.
+            task_inventory=TaskInventoryPolicy(include=(), handoffs=(), decisions=()),
+            reviewers={
+                name: ReviewerDeclaration(
+                    name=name,
+                    adapter=spec["adapter"],
+                    command=tuple(spec["command"]),
+                    network=spec["network"],
+                    blocking=spec.get("blocking", False),
+                    profiles=tuple(spec.get("profiles", ())),
+                    owner=spec.get("owner"),
+                    expected_provider=spec.get("expected_provider"),
+                    expected_model=spec.get("expected_model"),
+                    exception_reason=spec.get("exception_reason"),
+                    exception_expires=spec.get("exception_expires"),
+                    version_command=(
+                        tuple(spec["version_command"]) if "version_command" in spec else None
+                    ),
+                    cwd=spec.get("cwd", "."),
+                    timeout_seconds=float(spec.get("timeout_seconds", 60)),
+                    max_output_bytes=spec.get("max_output_bytes", 1_000_000),
+                    redact=tuple(spec.get("redact", ())),
+                    applies_to=tuple(spec.get("applies_to", ())),
+                )
+                for name, spec in loaded.get("reviewers", {}).items()
+            },
+            approval_required=tuple(loaded.get("approval_required", ())),
+            raw=loaded,
+            document_projects=_v2_project_registry(loaded, manifest_path.parent),
+            agent_scheduling=loaded.get("agent_scheduling", {}).get("enabled", False),
+            size_gate=SizeGateThresholds(
+                max_acceptance_criteria=loaded.get("agent_scheduling", {}).get(
+                    "max_acceptance_criteria",
+                    SizeGateThresholds().max_acceptance_criteria,
+                ),
+                max_touched_dirs=loaded.get("agent_scheduling", {}).get(
+                    "max_touched_dirs", SizeGateThresholds().max_touched_dirs
+                ),
+            ),
+        )
     return Manifest(
         path=manifest_path,
         version=loaded["version"],

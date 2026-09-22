@@ -2,6 +2,154 @@
 
 This changelog records changes to the installable `software-engineering` Agent Skill artifact.
 
+## 0.11.3 — 2026-09-09
+
+- Report document-validation change-set paths, effective date and fallback policy; unavailable discovery exits 3 while retaining findings. Preserve advisory-only success exits and guard run sealing against discovery failures, including nested-project fingerprints (task 0105).
+- Route selected practices to observable application evidence and scoped specialist tools, with version-aware documentation fallback and no mechanical-work ceremony (partial task 0111; behavioral evaluation remains unexecuted).
+- Calibrate record worthiness and scope-aware decision authority, separating scheduling, implementation and acceptance while preserving project taxonomies (task 0110).
+- Clarify conditional launch prerequisites and preserve shared-cache policy in development verification; no temporary-cache fallback or new provisioning mode is introduced (partial task 0102).
+- Clarify independent storage, audience, and release-payload judgments; preserve useful public contributor records and scoped private operational records (task 0100).
+- Render existing error details and next-command hints in the generic human CLI fallback (task 0103). JSON output, exit codes, and explicitly supplied human output are unchanged.
+
+## 0.11.2 — 2026-09-06
+
+- Prefer a verified PATH launcher; resolve portable fallback scripts from the loaded SKILL.md location without assuming an installation directory.
+
+## 0.11.1 — 2026-09-06
+
+- Declare optional CLI entry points for skill-manager PATH exposure; portable invocation stays available.
+
+## 0.11.0 — 2026-08-23
+
+- **Per-role content-quality standards folded into authoring guidance and role templates (task
+  0109, advisory only).** The cross-vendor debate (research 0013) produced a per-role standard for
+  what makes the _content_ of each of the 17 document roles good — telos, content-quality
+  properties, a discriminating test, and an exemplar/anti-example. Three new knowledge records ship
+  that standard, one per role kind:
+  - [`documentation-record-content-standards.md`](knowledge/documentation-record-content-standards.md)
+    — the seven record roles (task, ADR, audit, research, lesson, handoff, plan).
+  - [`documentation-living-content-standards.md`](knowledge/documentation-living-content-standards.md)
+    — the eight living roles (specification, knowledge, reference, standard, guide, roadmap,
+    changelog, runbook).
+  - [`documentation-meta-content-standards.md`](knowledge/documentation-meta-content-standards.md)
+    — the two meta-roles (index, template).
+    All three route under `documentation-repository-organization` and are linked from the knowledge
+    INDEX. The 17 role templates' quality-bar comments now carry a plain-text pointer to the
+    matching standard (naming the skill knowledge file and section, not a relative markdown link) as a
+    removable authoring prompt — not a gate: a record still allocates and validates after the entire
+    comment is removed (covered by a fixture that truly strips the block). No enforcement machinery,
+    schema, reviewer, or classifier changed.
+
+## 0.10.1 — 2026-08-19
+
+- **Publication scan: "no dependency manifests" is no longer misreported as scanner failure.**
+  When `osv-scanner` is installed but the scanned tree contains no OSV-recognized manifest or
+  lockfile, the tool prints `No package sources found` and exits non-zero. `inspect publication`
+  previously mapped that non-zero exit to `dependency-vulnerabilities: unavailable` with blocking
+  `dependency.scope-*` risks — indistinguishable from a genuine tool/network failure. It now
+  classifies the "no package sources" sentinel as `not_applicable` (the same terminal state as a
+  zero-package result), so self-contained skills with inline/PEP723 dependencies scan cleanly.
+
+## 0.10.0 — 2026-08-18
+
+- **Agent-scale ticketing and records substrate (ADR 0025, epic 0090).** The
+  documentation/ticketing system becomes agent-schedulable — additively and opt-in. All new
+  guardrails are **off by default** and activate only when a project sets `agent_scheduling.enabled`
+  in its `engineering.yaml`; every existing record and single-project/v1 behavior is unchanged.
+  - **Scheduling graph.** Task frontmatter gains optional `depends_on`, `parent`, `touches`, `size`,
+    and `priority` fields. `engineering task graph` projects the declared dependency DAG read-only
+    (topological order, derived ready-set, waves, cycle/orphan detection) suitable for a generated
+    `tasks/README.md`. `engineering task next` gives an advisory, read-only next-ready suggestion
+    ordered by `priority`/`size` — it never claims, locks, dispatches, or mutates state (concurrency
+    is harness-owned; the CLI makes no mutual-exclusion guarantee).
+  - **State predicates.** Optional `in_progress` task state plus a derived predicate layer
+    (`is_open`/`is_started`/`is_blocked`/`is_terminal_success`/`is_terminal_noop`/`needs_review`)
+    with defaults for existing states; unmapped states resolve to `unknown`, never invalid.
+  - **Record lint.** `engineering record lint --mode structure|quality-review` generalizes the
+    `done_task_evidence` gate to per-role required-structure/provenance (blocking only under the
+    profile) and advisory quality-review prompts (never block).
+  - **Advisory task-size gate.** Under the profile, oversize smells (many acceptance criteria; broad
+    touched-directory span) warn and prompt vertical-slice decomposition, with an `atomic_large`
+    exception (rationale + rollback/verify plan + checkpoints) and per-project-tunable thresholds. It
+    never hard-blocks; the decidable invariants (done-without-evidence, dependency cycle,
+    acceptance-criterion-without-check) remain enforced by existing mechanisms.
+  - **`plan` record role.** A seventh record role (execution-plan / progress log: created-at-start,
+    updated-per-checkpoint, closed-at-done) is added to the closed vocabulary, template, and
+    profile-gated allocator, with per-role template quality bars documented in
+    `knowledge/documentation-structure.md`.
+
+## 0.9.0 — 2026-08-15
+
+- **Multi-project document governance (manifest v2, ADR 0024, task 0089).** One git-root
+  `engineering.yaml` can now govern multiple projects' `dev/docs` record populations, not only a
+  single project's. A version-dispatched schema adds `docs.currency.projects[]`, each declaring its
+  own record-role `include`/`index`, `required_current_truth`, `done_task_evidence`, and
+  `task_inventory` (with per-project planning). `document new/backfill/validate/query/currency/index/
+graph/trace/explain` gain a `--project <id>` selector and infer the project from
+  `--project-root`/path when unambiguous; allocation, validation, currency, query, and the index
+  cache are project-scoped and boundary-contained (records bounded by the project's `docs_root`, the
+  source register by the workspace root, and global living/meta roles by the repository root). The
+  index cache is namespaced per project (`.engineering/projects/<id>/document-index-v1.json`).
+  Aggregate verbs (`docs`, `doctor`, `finish`) run one global living/meta pass plus per-project
+  record passes, project-tagged and deduped. Relationship targets for the six record roles resolve
+  per project (a dangling `task:0002` in one project is not satisfied by another project's record),
+  while living/meta identities remain global. **Fully backward-compatible:** a v1 manifest and every
+  existing single-project record and behavior are byte-for-byte unchanged, guarded by a v1
+  byte-parity golden harness across all eleven document verbs.
+
+## 0.8.1 — 2026-08-15
+
+- **Tier-gate role-specific body validators (follow-up to 0.8.0).** `document validate` now applies
+  the task acceptance-criterion checks (`criterion-id-missing`, `criteria-mismatch`) and the research
+  source-reconciliation check only at `full` tier, consistent with `required_sections`. Historical
+  (core-tier) records no longer need criterion IDs or reconciled sources; new (`contract_tier: full`)
+  records keep the strict checks. Closes a gap where core-tier record backfill still reported
+  `criterion-id-missing`.
+
+## 0.8.0 — 2026-08-15
+
+- **Tiered record-document compliance (ADR 0023).** `document validate` now distinguishes a `core`
+  and `full` compliance tier for record roles via the optional `engineering_document.contract_tier`
+  field (absent ⇒ `core`). At `core` tier a record is **not** required to carry the fixed role body
+  sections or a reconstructed multi-step transition path. Both tiers still enforce the v2 core, the
+  extension identity, the role/state enum, id uniqueness, index registration, legal asserted edges,
+  transition connectivity, final-state agreement, dates, and supersession consistency. `document new`
+  mints records at `full` tier (the six record templates carry `contract_tier: full`), so new records
+  keep the strict standard; living/meta roles are unchanged. This makes the historical-corpus
+  compliance sweep (task 0088) non-invasive — records need only core + extension, not body rewrites.
+
+## 0.7.7 — 2026-08-14
+
+Bug-fix batch resolving accumulated skill-feedback (2026-07-28..08-14):
+
+- **`--version` single source.** `engineering --version` and in-process
+  `scripts.cli.main(["--version"])` now derive the version from the colocated `SKILL.md` instead of a
+  hardcoded `0.1.0` literal in `cli/parser.py`, eliminating version drift.
+- **`explain` scalar rendering.** Scalar string fields (e.g. limits) render as a single line instead
+  of one character per bullet; genuine multi-entry sequences still render as a list.
+- **Portable-invocation cache fallback.** The documented `uv run` invocation selects a writable temp
+  `UV_CACHE_DIR` only when the default cache is not writable (the common sandbox first-run failure),
+  preserving the normal warm-cache path.
+- **`--project-root` honored exactly.** `inspect`, `document`, `start`, and `finish` treat an explicit
+  `--project-root` as the exact traversal boundary with no ancestor/git-root substitution via a new
+  shared `policy/project_root.py` resolver; a canonical-path difference is reported (`root_resolution`)
+  and warned rather than silently promoted.
+- **`finish` concurrency & scoping.** An unrelated concurrent HEAD advance is recorded as
+  `head_advance=benign` and no longer invalidates a run; only committed changes overlapping the run's
+  declared paths are incompatible (`declared_paths`), reported with exact git-diff and
+  replacement-run recovery commands. Check/fitness/reviewer/document-validation selection is scoped to
+  declared paths, so unrelated pre-existing findings are no longer aggregated.
+- **Publication scan scoping.** Active publication/security/privacy traversal is confined to the exact
+  root; gitleaks and privacy-history scans run only when the supplied root is itself the Git top level,
+  preventing an enclosing-monorepo history scan.
+- **Actionable pre-adoption diagnostics.** Missing/invalid manifests and missing
+  `docs.currency.roles` now name the exact field and the exact next command; manifest-less
+  `document roles` returns the bundled template contracts (`adopted=false`) and `document validate`
+  performs bounded read-only Markdown/link checks without creating `.engineering` state.
+- **Backfill numeric IDs.** For prefix-configured roles, `document backfill` derives the ID from the
+  numeric filename prefix instead of a title slug (failing closed on invalid filenames), and refuses a
+  legacy body `- Status:` line that contradicts frontmatter, preserving the byte-preservation contract.
+
 ## 0.7.6 — 2026-08-13
 
 - Retargeted the shipped JSON Schema `$id`s to the durable public

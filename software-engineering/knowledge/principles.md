@@ -41,6 +41,48 @@ Read the rest as questions to ask, not structures to impose:
 
 ---
 
+## Selecting and applying practices at the decision point
+
+Reading guidance is not applying it. Route the active task — including everything accumulated
+across a session, not just the latest message — through five steps before the first substantive
+edit, and again whenever the task expands:
+
+1. **Classify cumulative risk.** Combined blast radius, deployment effect, contract surface, and
+   verification burden of the whole active task. This picks the proportionality for everything
+   below; repeated small requests do not reset accumulated risk.
+2. **Select the smallest relevant guidance.** Match the task's full shape to the knowledge index's
+   positive route labels and open only those files. One plausible-looking match is a hint, not a
+   selection; unrelated matching sections are left unread.
+3. **Route to declared specialist capabilities within their scope.** When a project declares a
+   preferred capability for a kind of work — a review discipline, a testing oracle library, a
+   measurement practice — prefer it over ad hoc substitutes for the work it covers. Library and
+   API documentation carry a stricter, separate rule: a project-preferred documentation source is
+   used **first** for version-pinned API questions when it is available and its coverage holds,
+   with a stated, evidenced fallback when it does not — coverage semantics belong to
+   documentation sources, not to every specialist. Scope follows the question: a pure news or
+   announcement question does not invoke the documentation route, while a mixed question uses it
+   for its library-API component.
+4. **Apply with observable evidence.** The output of a selected practice is a relevant artifact —
+   a negative test on a failure path, a consumer trace, a boundary check, a measured budget, a
+   routed record — not a report of having read or invoked something. Proportion evidence to the
+   risk class from step 1.
+5. **State the disposition of each relevant practice by scope.** A disposition attaches to a named
+   scope — the whole practice or one of its components — and resolves to **applied** (with its
+   artifact), **not applicable** (with the excluding task fact), **unavailable** (with the missing
+   prerequisite or capability named), or **bypassed** (who authorized it). **Unavailable is not a
+   catch-all for unexamined:** a missing input is named, and work that is merely not yet assessed
+   is recorded as unassessed with an explicit deferral, not dressed as a disposition. Partial
+   coverage is stated honestly: one practice can be "applied for the auth boundary; key-rotation
+   verification unavailable — the required test environment could not be accessed" — scoped
+   components, each with its own truthful state. Scope the reporting to the task's risk class;
+   this is not a universal per-practice report requirement.
+
+A genuinely mechanical change with no accumulated risk needs none of this as a report — its
+routine checks are the application. The procedure exists so that nontrivial tasks surface the
+right practice before correction, not so that every task produces compliance prose.
+
+---
+
 ## The Four Levels of Design Thinking
 
 Most confusion comes from mixing levels. A class-level mistake can lock in an architectural pattern.

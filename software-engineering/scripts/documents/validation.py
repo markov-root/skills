@@ -18,6 +18,7 @@ from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 from yaml.tokens import AliasToken, AnchorToken, TagToken
 
+from ..policy.document_paths import DocumentContainment, DocumentContainmentError
 from ..policy.manifest import DocsCurrencyPolicy, DocsPolicy, DocumentRolePolicy
 from .contracts import (
     DOCUMENT_SCHEMA_VERSION,
@@ -27,6 +28,7 @@ from .contracts import (
     DocumentContractRecord,
     core_metadata_validator,
     metadata_validator,
+    record_contract_tier,
     validate_document_records,
 )
 from .currency import validate_currency
@@ -57,6 +59,7 @@ ROLE_LABELS = {
     "audit": "Audit",
     "research": "Research",
     "handoff": "Handoff",
+    "plan": "Plan",
     "specification": "Specification",
     "knowledge": "Knowledge",
     "reference": "Reference",
@@ -445,12 +448,16 @@ def validate_typed_documents(
     *,
     changed_paths: Sequence[str] = (),
     current_date: str | None = None,
+    containment: DocumentContainment | None = None,
+    extra_known_identities: frozenset[str] = frozenset(),
 ) -> tuple[RoleFinding, ...]:
     return scan_typed_documents(
         root,
         policy,
         changed_paths=changed_paths,
         current_date=current_date,
+        containment=containment,
+        extra_known_identities=extra_known_identities,
     ).findings
 
 
@@ -460,16 +467,30 @@ def validate_adopted_documents(
     *,
     changed_paths: Sequence[str] | None = None,
     current_date: str | None = None,
+    containment: DocumentContainment | None = None,
+    extra_known_identities: frozenset[str] = frozenset(),
+    typed_scan: DocumentScan | None = None,
 ) -> tuple[DocFinding, ...]:
     """Apply currency and typed-record validation from one adopted policy input."""
-    findings = (
-        *validate_currency(root, policy),
-        *validate_typed_documents(
+    scan = (
+        typed_scan
+        if typed_scan is not None
+        else scan_typed_documents(
             root,
             policy,
             changed_paths=changed_paths or (),
             current_date=current_date,
+            containment=containment,
+            extra_known_identities=extra_known_identities,
+        )
+    )
+    findings = (
+        *validate_currency(
+            root,
+            policy,
+            docs_root=None if containment is None else containment.docs_root,
         ),
+        *scan.findings,
     )
     if changed_paths is None:
         return findings
@@ -483,6 +504,9 @@ def validate_documents(
     *,
     changed_paths: Sequence[str] | None = None,
     current_date: str | None = None,
+    containment: DocumentContainment | None = None,
+    extra_known_identities: frozenset[str] = frozenset(),
+    typed_scan: DocumentScan | None = None,
 ) -> tuple[DocFinding, ...]:
     """Apply the complete adopted Markdown and typed-document validation contract."""
     forbidden = (r"\]\(\s*file://",) if policy.forbid_legacy_links else ()
@@ -498,6 +522,9 @@ def validate_documents(
             policy.currency,
             changed_paths=changed_paths,
             current_date=current_date,
+            containment=containment,
+            extra_known_identities=extra_known_identities,
+            typed_scan=typed_scan,
         ),
     )
 
@@ -548,6 +575,8 @@ def scan_typed_documents(
     *,
     changed_paths: Sequence[str] = (),
     current_date: str | None = None,
+    containment: DocumentContainment | None = None,
+    extra_known_identities: frozenset[str] = frozenset(),
 ) -> DocumentScan:
     if policy is None:
         return DocumentScan((), (), (), (), False)
@@ -564,7 +593,12 @@ def scan_typed_documents(
         if declaration.contract is None:
             continue
         declarations[declaration.name] = declaration
-        for path, include_patterns in _expand_role(root, declaration, findings):
+        for path, include_patterns in _expand_role(
+            root,
+            declaration,
+            findings,
+            containment=containment,
+        ):
             source = path.relative_to(root).as_posix()
             if previous := selected_sources.get(source):
                 findings.append(
@@ -606,12 +640,18 @@ def scan_typed_documents(
             break
 
     records = [item.record for item in extracted]
-    for issue in validate_document_records(records):
+    for issue in validate_document_records(records, extra_known_identities):
         findings.append(_finding(issue.code, issue.source, issue.line, issue.message))
 
     by_source = {item.record.source: item for item in extracted}
     for item in extracted:
-        _validate_body(root, item, declarations_by_source[item.record.source], findings)
+        _validate_body(
+            root,
+            item,
+            declarations_by_source[item.record.source],
+            findings,
+            containment=containment,
+        )
     if current_date is not None:
         changed = set(changed_paths)
         for item in extracted:
@@ -629,7 +669,13 @@ def scan_typed_documents(
                         f"current UTC date is {current_date!r}",
                     )
                 )
-    _validate_index_states(root, declarations, by_source, findings)
+    _validate_index_states(
+        root,
+        declarations,
+        by_source,
+        findings,
+        containment=containment,
+    )
     _validate_deliberation_direction(extracted, findings)
     normalized = tuple(
         sorted(
@@ -655,7 +701,11 @@ def _expand_role(
     root: Path,
     declaration: DocumentRolePolicy,
     findings: list[RoleFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> tuple[tuple[Path, tuple[str, ...]], ...]:
+    if containment is not None:
+        return _expand_contained_role(containment, declaration, findings)
     found: dict[Path, list[str]] = {}
     index = (root / declaration.index).resolve()
     for pattern in declaration.include:
@@ -689,6 +739,89 @@ def _expand_role(
                 )
                 return tuple((path, tuple(patterns)) for path, patterns in sorted(found.items()))
     return tuple((path, tuple(patterns)) for path, patterns in sorted(found.items()))
+
+
+def _expand_contained_role(
+    containment: DocumentContainment,
+    declaration: DocumentRolePolicy,
+    findings: list[RoleFinding],
+) -> tuple[tuple[Path, tuple[str, ...]], ...]:
+    found: dict[Path, list[str]] = {}
+    try:
+        index = _require_contained_document_path(
+            containment,
+            declaration.index,
+            purpose=f"{declaration.name} role index",
+            must_exist=False,
+        )
+    except DocumentContainmentError as exc:
+        findings.append(
+            _finding(
+                "document.source-outside-root",
+                declaration.index,
+                1,
+                str(exc),
+            )
+        )
+        return ()
+    for pattern in declaration.include:
+        try:
+            candidates = (
+                containment.expand_project_glob(
+                    pattern,
+                    purpose=f"{declaration.name} typed document source",
+                )
+                if containment.docs_root is not None
+                else containment.expand_global_glob(
+                    pattern,
+                    purpose=f"{declaration.name} typed document source",
+                )
+            )
+        except DocumentContainmentError as exc:
+            findings.append(
+                _finding(
+                    "document.source-outside-root",
+                    pattern,
+                    1,
+                    str(exc),
+                )
+            )
+            continue
+        for resolved in candidates:
+            if resolved == index:
+                continue
+            found.setdefault(resolved, []).append(pattern)
+            if len(found) >= MAX_DOCUMENTS:
+                findings.append(
+                    _finding(
+                        "document.source-truncated",
+                        declaration.index,
+                        1,
+                        f"typed document scan stopped at {MAX_DOCUMENTS} documents",
+                    )
+                )
+                return tuple((path, tuple(patterns)) for path, patterns in sorted(found.items()))
+    return tuple((path, tuple(patterns)) for path, patterns in sorted(found.items()))
+
+
+def _require_contained_document_path(
+    containment: DocumentContainment,
+    value: str | Path,
+    *,
+    purpose: str,
+    must_exist: bool = True,
+) -> Path:
+    if containment.docs_root is not None:
+        return containment.require_project_path(
+            value,
+            purpose=purpose,
+            must_exist=must_exist,
+        )
+    return containment.require_global_path(
+        value,
+        purpose=purpose,
+        must_exist=must_exist,
+    )
 
 
 def _extract(
@@ -1152,11 +1285,16 @@ def _validate_body(
     item: ExtractedDocument,
     declaration: DocumentRolePolicy,
     findings: list[RoleFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> None:
     if not item.record_role:
         return
     metadata = item.record.metadata
     if list(metadata_validator().iter_errors(metadata)):
+        return
+    full_contract = record_contract_tier(metadata) == "full"
+    if not full_contract:
         return
     headings: list[tuple[int, int, str]] = []
     tokens = MARKDOWN.parse(item.body)
@@ -1194,7 +1332,14 @@ def _validate_body(
     if declaration.contract.role == "task":
         _validate_task_criteria(item, findings)
     if declaration.contract.role == "research":
-        _validate_research_sources(root, item, declaration, headings, findings)
+        _validate_research_sources(
+            root,
+            item,
+            declaration,
+            headings,
+            findings,
+            containment=containment,
+        )
 
 
 def _validate_task_criteria(
@@ -1272,10 +1417,17 @@ def _validate_research_sources(
     declaration: DocumentRolePolicy,
     headings: Sequence[tuple[int, int, str]],
     findings: list[RoleFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> None:
     selected = _research_sources_section(item, headings)
     local_sources = selected[2] if selected is not None else set()
-    register = _central_research_source_register(root, item, declaration)
+    register = _central_research_source_register(
+        root,
+        item,
+        declaration,
+        containment=containment,
+    )
     source_line = (
         register.line if register is not None else (selected[1] if selected else item.body_line)
     )
@@ -1333,6 +1485,8 @@ def _central_research_source_register(
     root: Path,
     item: ExtractedDocument,
     declaration: DocumentRolePolicy,
+    *,
+    containment: DocumentContainment | None = None,
 ) -> ResearchSourceRegister | None:
     identifier = str(item.record.metadata.get("id", ""))
     if not identifier:
@@ -1340,9 +1494,22 @@ def _central_research_source_register(
     fallback: ResearchSourceRegister | None = None
     for path in _research_source_register_candidates(root, declaration):
         try:
-            resolved = path.resolve()
+            if containment is not None:
+                resolved = (
+                    containment.require_workspace_path(
+                        path,
+                        purpose="research source register",
+                    )
+                    if containment.workspace_root is not None
+                    else containment.require_global_path(
+                        path,
+                        purpose="research source register",
+                    )
+                )
+            else:
+                resolved = path.resolve()
             relative = resolved.relative_to(root).as_posix()
-        except (OSError, RuntimeError, ValueError):
+        except (DocumentContainmentError, OSError, RuntimeError, ValueError):
             continue
         if not resolved.is_file():
             continue
@@ -1401,15 +1568,25 @@ def _validate_index_states(
     declarations: Mapping[str, DocumentRolePolicy],
     by_source: Mapping[str, ExtractedDocument],
     findings: list[RoleFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> None:
     for declaration in declarations.values():
         if not declaration.states:
             continue
         candidate = root / declaration.index
         try:
-            index = candidate.resolve()
-            index.relative_to(root)
-        except (OSError, RuntimeError, ValueError):
+            if containment is not None:
+                index = _require_contained_document_path(
+                    containment,
+                    candidate,
+                    purpose=f"{declaration.name} role index",
+                    must_exist=False,
+                )
+            else:
+                index = candidate.resolve()
+                index.relative_to(root)
+        except (DocumentContainmentError, OSError, RuntimeError, ValueError):
             findings.append(
                 _finding(
                     "document.source-outside-root",
@@ -1464,8 +1641,14 @@ def _validate_index_states(
                     continue
                 candidate = (index.parent / unquote(split.path)).resolve()
                 try:
+                    if containment is not None:
+                        candidate = _require_contained_document_path(
+                            containment,
+                            candidate,
+                            purpose="typed role index link target",
+                        )
                     source = candidate.relative_to(root).as_posix()
-                except ValueError:
+                except (DocumentContainmentError, ValueError):
                     continue
                 item = by_source.get(source)
                 if item is not None and item.record.metadata.get("state") != states[0]:

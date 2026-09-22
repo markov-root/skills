@@ -26,7 +26,12 @@ from .model import (
     BodyInspectionRequest,
     BodyInspectionUnavailable,
     DELIVERY_STATES,
+    ELIGIBILITY_USE_CASES,
+    EVENT_SCHEMA_VERSION,
+    EVIDENCE_ELIGIBILITY_POLICY_VERSION,
+    EVIDENCE_RESULTS,
     FeedbackError,
+    source_eligible_for,
     MetadataView,
     QUALITATIVE_PRIVACY_SCANNER_VERSION,
     ScopedBodyInput,
@@ -93,6 +98,109 @@ def _timestamp(value: str) -> datetime:
 def _in_window(event: dict, after: datetime | None, before: datetime | None) -> bool:
     occurred = _timestamp(event["occurred_at"])
     return not ((after and occurred < after) or (before and occurred >= before))
+
+
+def _tombstones_in_window(
+    events: list[dict],
+    *,
+    after: datetime | None,
+    before: datetime | None,
+    skills: set[str],
+    before_inclusive: bool = False,
+) -> list[tuple[dict, datetime | None]]:
+    selected = []
+    for event in events:
+        if event.get("event_type") != "observation.tombstoned":
+            continue
+        if skills and (event.get("skill") or {}).get("name") not in skills:
+            continue
+        payload = event.get("payload") or {}
+        prior_at = payload.get("prior_occurred_at")
+        if prior_at:
+            try:
+                prior_timestamp = _timestamp(prior_at)
+            except (TypeError, ValueError):
+                prior_timestamp = None
+        else:
+            prior_timestamp = None
+        if prior_timestamp is not None and (
+            (after and prior_timestamp < after)
+            or (
+                before
+                and (
+                    prior_timestamp > before
+                    if before_inclusive
+                    else prior_timestamp >= before
+                )
+            )
+        ):
+            continue
+        if prior_timestamp is None:
+            occurred = _timestamp(event["occurred_at"])
+            if (after and occurred < after) or (
+                before
+                and (occurred > before if before_inclusive else occurred >= before)
+            ):
+                continue
+        selected.append((event, prior_timestamp))
+    return selected
+
+
+def _build_censoring(
+    events: list[dict],
+    *,
+    after: datetime | None,
+    before: datetime | None,
+    skills: set[str],
+    before_inclusive: bool = False,
+) -> dict:
+    """Aggregate content-free tombstones into affected class/day buckets.
+
+    The prior timestamp describes the deleted record's analytical bucket; the
+    tombstone timestamp describes when deletion became observable. Keeping these
+    separate makes post-deletion censoring distinguishable from original
+    missingness without reconstructing deleted content (ADR 0022 D7).
+    """
+    selected = _tombstones_in_window(
+        events,
+        after=after,
+        before=before,
+        skills=skills,
+        before_inclusive=before_inclusive,
+    )
+
+    by_class: dict[str, int] = {}
+    by_bucket: dict[tuple[str, str], int] = {}
+    corpus_versions = []
+    for event, prior_timestamp in selected:
+        payload = event.get("payload") or {}
+        event_class = payload.get("prior_event_type") or "observation.recorded"
+        day = prior_timestamp.date().isoformat() if prior_timestamp else "unknown"
+        by_class[event_class] = by_class.get(event_class, 0) + 1
+        key = (day, event_class)
+        by_bucket[key] = by_bucket.get(key, 0) + 1
+        version = payload.get("corpus_version")
+        if isinstance(version, int) and not isinstance(version, bool):
+            corpus_versions.append(version)
+
+    censored = bool(selected)
+    return {
+        "status": "censored" if censored else "uncensored",
+        "cause": "post_deletion" if censored else None,
+        "post_deletion": censored,
+        "original_missingness": "separate",
+        "tombstone_count": len(selected),
+        "corpus_version": max(corpus_versions) if corpus_versions else None,
+        "affected_event_classes": dict(sorted(by_class.items())),
+        "affected_time_buckets": [
+            {
+                "day": day,
+                "event_class": event_class,
+                "deleted_events": count,
+            }
+            for (day, event_class), count in sorted(by_bucket.items())
+        ],
+    }
 
 
 def _one_actual(finishes: list[dict], field: str) -> str | None:
@@ -191,6 +299,7 @@ def _new_group(
         "dimensions": dict(zip(group_by, key, strict=True)),
         "population": {
             "uses": 0,
+            "capability_executions": 0,
             "finished": 0,
             "incomplete": 0,
             "conflicting_finishes": 0,
@@ -208,7 +317,14 @@ def _new_group(
             "positive": 0,
             "negative": 0,
             "mixed": 0,
+            "linked_to_invocation": 0,
             "unlinked_to_invocation": 0,
+        },
+        "capture_mechanisms": {
+            "automatic": 0,
+            "manual-start": 0,
+            "note-only": 0,
+            "unknown": 0,
         },
         "preservation": {
             "praise": 0,
@@ -217,6 +333,20 @@ def _new_group(
             "verified_with_test": 0,
         },
         "rates_per_100_uses": {},
+        # C4 (ADR 0021 D4): downstream-eligible counts, kept visibly distinct
+        # from the raw observation/preservation counters above.
+        "eligible_aggregates": {use_case: 0 for use_case in ELIGIBILITY_USE_CASES},
+        # C4 (ADR 0021 D5): record-time evidence-verification result tally.
+        "evidence_verification": {
+            **{result: 0 for result in EVIDENCE_RESULTS},
+            "observations_with_evidence": 0,
+            "total_references": 0,
+        },
+        # Private accumulators; removed before serialization.
+        "_decision_episode_ids": set(),  # C3 ADR 0020 D3
+        "_source_counts": {},  # C4 ADR 0021 D3: source -> raw observation count
+        "_source_eligible": {},  # C4 ADR 0021 D3: source -> eligible-for-any count
+        "_privacy_strata": {},  # C4 ADR 0021 D6: task_class -> coverage accumulator
     }
 
 
@@ -262,6 +392,972 @@ def reconcile_disposition_status(events: list[dict]) -> list[str]:
     return diagnostics
 
 
+COMPARISON_READINESS_POLICY_VERSION = 1
+# C5 (ADR 0022 D2): the versioned pre-action stratum contract.
+STRATUM_CONTRACT_VERSION = 1
+# C5 (ADR 0022 D3): the versioned prospective-evaluation readiness policy.
+READINESS_POLICY_VERSION = 2
+_MIN_READY_DECISIONS = 3
+_MIN_OVERLAP_RATE = 0.5
+_MIN_OUTCOME_COVERAGE_RATE = 0.5
+# C5 (ADR 0022 D4): the versioned immutable evaluation manifest.
+EVALUATION_MANIFEST_VERSION = 1
+_MIN_OBSERVATION_LINK_RATE = 0.8
+_MIN_ACTIVATION_COVERAGE = 0.8
+# C4 (ADR 0021 D6): a privacy stratum whose label coverage falls below this
+# abstains rather than borrowing a better-observed stratum's result.
+_MIN_LABEL_COVERAGE = 0.8
+# C5 (ADR 0022 D5): the versioned estimator-gating policy. Every estimator is
+# gated on the decision.logged population; on any unmet gate the output is a
+# neutral prediction-audit/abstention that makes NO causal/OPE/regret claim.
+DECISION_ESTIMATOR_POLICY_VERSION = 1
+# The one predeclared target policy: uniform over the eligible candidate actions.
+DEFAULT_TARGET_POLICY = "uniform_eligible"
+TARGET_POLICIES = (DEFAULT_TARGET_POLICY,)
+# Named-oracle reward map; "unknown" (and an absent outcome) is a MISSING reward,
+# never a silent zero.
+_OUTCOME_REWARDS = {
+    "success": 1.0,
+    "partial": 0.5,
+    "failure": 0.0,
+    "abandoned": 0.0,
+}
+# Estimator-specific assumptions, surfaced only alongside an actual estimate (never
+# asserted as satisfied on abstention).
+_ESTIMATOR_ASSUMPTIONS = {
+    "ips": (
+        "the logged chosen_action_probability is the true behaviour-policy "
+        "probability of the chosen action",
+        "positivity/support: the target policy places mass only where the logging "
+        "policy had positive probability",
+        "the pre-action covariates are complete and stable (no post-selection leak)",
+        "the named oracle maps each outcome to its reward correctly",
+    ),
+}
+ESTIMATORS = tuple(_ESTIMATOR_ASSUMPTIONS)
+_MIN_ESTIMATOR_OUTCOME_COVERAGE = 0.5
+
+
+def build_estimator_evaluation(
+    included: list[dict],
+    *,
+    estimator: str,
+    target_policy: str,
+    censored: bool = False,
+) -> dict:
+    """C5 (ADR 0022 D5): gate a predeclared estimator on the decision.logged
+    population and either run ONLY that estimator or emit a neutral prediction
+    audit / abstention.
+
+    Gates (all must pass to estimate): at least one logged decision; every included
+    decision has a numeric logged assignment probability (propensity_known); every
+    included decision is stochastic so the stochastic target has support
+    (assignment_overlap); enough decisions carry a measured reward under a named
+    oracle (outcome_coverage); and no attached outcome pre-dates its decision
+    (no_temporal_leak). On ANY unmet gate the result is a ``prediction_audit`` with
+    support diagnostics and a (typically uninformative) worst-case bound, and it
+    contains NO causal / off-policy / regret claim or vocabulary. Only when every
+    gate passes is an IPS estimate of the predeclared uniform-eligible target
+    reported, with an effective sample size, a 95% normal-approximation interval,
+    the count of missing outcomes, and the estimator's assumptions."""
+    if estimator not in ESTIMATORS:
+        raise FeedbackError(
+            f"unknown estimator {estimator!r}; predeclared estimators: "
+            f"{', '.join(ESTIMATORS)}"
+        )
+    if target_policy not in TARGET_POLICIES:
+        raise FeedbackError(
+            f"unknown target_policy {target_policy!r}; predeclared: "
+            f"{', '.join(TARGET_POLICIES)}"
+        )
+
+    decisions = [
+        event for event in included if event["event_type"] == "decision.logged"
+    ]
+    latest_outcome: dict[str, dict] = {}
+    for event in included:
+        if event["event_type"] != "decision.outcome":
+            continue
+        decision_id = event["payload"]["decision_id"]
+        prior = latest_outcome.get(decision_id)
+        if prior is None or _timestamp(event["occurred_at"]) >= _timestamp(
+            prior["occurred_at"]
+        ):
+            latest_outcome[decision_id] = event
+
+    total = len(decisions)
+    known_propensity = 0
+    overlapping = 0
+    temporal_anomalies = 0
+    reward_covered = 0
+    missing_outcomes = 0
+    samples: list[tuple[float, float]] = []
+    for decision in decisions:
+        payload = decision["payload"]
+        probability = payload.get("chosen_action_probability")
+        prob_known = isinstance(probability, (int, float)) and not isinstance(
+            probability, bool
+        )
+        if prob_known:
+            known_propensity += 1
+        prob_overlap = prob_known and 0 < probability < 1
+        if prob_overlap:
+            overlapping += 1
+        reward: float | None = None
+        outcome_event = latest_outcome.get(payload.get("decision_id"))
+        if outcome_event is None:
+            missing_outcomes += 1
+        elif _timestamp(outcome_event["occurred_at"]) <= _timestamp(
+            decision["occurred_at"]
+        ):
+            temporal_anomalies += 1
+        else:
+            reward = _OUTCOME_REWARDS.get(outcome_event["payload"].get("outcome"))
+            if reward is None:  # e.g. "unknown" -- a missing, not zero, reward
+                missing_outcomes += 1
+            else:
+                reward_covered += 1
+        if prob_overlap and reward is not None:
+            mask = payload.get("eligibility_mask") or {}
+            eligible = sum(1 for value in mask.values() if value) or len(
+                payload.get("candidate_actions") or []
+            )
+            target_prob = (1.0 / eligible) if eligible else 0.0
+            samples.append((target_prob / probability, reward))
+
+    propensity_coverage = round(known_propensity / total, 3) if total else 0.0
+    overlap_rate = round(overlapping / total, 3) if total else 0.0
+    outcome_coverage = round(reward_covered / total, 3) if total else 0.0
+    weight_sum = sum(weight for weight, _ in samples)
+    weight_sq_sum = sum(weight * weight for weight, _ in samples)
+    effective_sample_size = (
+        round(weight_sum * weight_sum / weight_sq_sum, 3) if weight_sq_sum else 0.0
+    )
+
+    gates = [
+        {
+            "id": "decision_logging",
+            "passed": total >= 1,
+            "measured": total,
+            "required": 1,
+            "detail": "at least one logged decision is required",
+        },
+        {
+            "id": "propensity_known",
+            "passed": total >= 1 and known_propensity == total,
+            "measured": propensity_coverage,
+            "required": 1.0,
+            "detail": "every included decision needs a numeric logged assignment probability",
+        },
+        {
+            "id": "assignment_overlap",
+            "passed": total >= 1 and overlapping == total,
+            "measured": overlap_rate,
+            "required": 1.0,
+            "detail": (
+                "every included decision needs a stochastic assignment "
+                "(probability strictly between 0 and 1) so the target has support"
+            ),
+        },
+        {
+            "id": "outcome_coverage",
+            "passed": outcome_coverage >= _MIN_ESTIMATOR_OUTCOME_COVERAGE,
+            "measured": outcome_coverage,
+            "required": _MIN_ESTIMATOR_OUTCOME_COVERAGE,
+            "detail": "enough decisions need a measured outcome under a named oracle",
+        },
+        {
+            "id": "no_temporal_leak",
+            "passed": temporal_anomalies == 0,
+            "measured": temporal_anomalies,
+            "required": 0,
+            "detail": "no attached outcome may pre-date its decision (pre-action covariates only)",
+        },
+        {
+            "id": "censored_window",
+            "passed": not censored,
+            "measured": int(censored),
+            "required": 0,
+            "detail": "the evaluation window must not contain post-deletion censoring",
+        },
+    ]
+    unmet = [gate["id"] for gate in gates if not gate["passed"]]
+
+    support = {
+        "n_decisions": total,
+        "propensity_coverage": propensity_coverage,
+        "overlap_rate": overlap_rate,
+        "outcome_coverage": outcome_coverage,
+        "temporal_anomalies": temporal_anomalies,
+        "missing_outcomes": missing_outcomes,
+        "effective_sample_size": effective_sample_size,
+    }
+    result: dict[str, Any] = {
+        "policy_version": DECISION_ESTIMATOR_POLICY_VERSION,
+        "estimator": estimator,
+        "target_policy": target_policy,
+        "mode": "estimate" if not unmet else "prediction_audit",
+        "abstained": bool(unmet),
+        "gates": gates,
+        "support": support,
+    }
+    if unmet:
+        # A neutral prediction audit: report the diagnostics and a worst-case reward
+        # bound only. NO causal / off-policy / regret claim or vocabulary is emitted,
+        # and the estimator's assumptions are NOT asserted as satisfied.
+        result["unmet_gates"] = unmet
+        result["summary"] = (
+            "insufficient support to estimate; see unmet_gates and support diagnostics"
+        )
+        result["partial_identification"] = {
+            "lower": 0.0,
+            "upper": 1.0,
+            "method": "worst-case reward bound over unsupported/unobserved outcomes",
+            "informative": False,
+        }
+        return result
+
+    values = [weight * reward for weight, reward in samples]
+    n_samples = len(values)
+    mean = sum(values) / n_samples
+    if n_samples > 1:
+        variance = sum((value - mean) ** 2 for value in values) / (n_samples - 1)
+        std_error = (variance / n_samples) ** 0.5
+    else:
+        std_error = 0.0
+    result["assumptions"] = list(_ESTIMATOR_ASSUMPTIONS[estimator])
+    result["estimate"] = {
+        "method": estimator,
+        "value": round(mean, 4),
+        "confidence_interval": [
+            round(mean - 1.96 * std_error, 4),
+            round(mean + 1.96 * std_error, 4),
+        ],
+        "uncertainty": {
+            "std_error": round(std_error, 4),
+            "interval_method": "normal-approximation 95%",
+        },
+        "effective_sample_size": effective_sample_size,
+        "samples_used": n_samples,
+        "reward_oracle": (
+            "outcome->reward map (success=1.0, partial=0.5, failure=0.0, "
+            "abandoned=0.0; unknown/absent is a missing reward)"
+        ),
+    }
+    return result
+
+
+def _comparison_readiness(group: dict) -> dict:
+    """C3 (ADR 0020 D4): versioned gate on whether a group's per-use rates are
+    comparable. Both observation-link coverage and activation coverage must meet
+    the policy; otherwise the failed dimensions are named so callers know why
+    per-use rates and cross-skill ordering are suppressed."""
+    failed: list[str] = []
+    if group["observation_link_rate"] < _MIN_OBSERVATION_LINK_RATE:
+        failed.append("observation_link_rate")
+    mechanisms = group["capture_mechanisms"]
+    total = sum(mechanisms.values())
+    captured = sum(count for name, count in mechanisms.items() if name != "unknown")
+    activation_coverage = (captured / total) if total else 0.0
+    if activation_coverage < _MIN_ACTIVATION_COVERAGE:
+        failed.append("activation_coverage")
+    return {
+        "policy_version": COMPARISON_READINESS_POLICY_VERSION,
+        "eligible": not failed,
+        "failed_dimensions": failed,
+        "activation_coverage": round(activation_coverage, 3),
+        "observation_link_rate": group["observation_link_rate"],
+    }
+
+
+def build_activation_receipts(events: list[dict], skills: set[str]) -> dict:
+    """C3 (ADR 0020 D6): activation-receipt completion vs MNAR dropout, by harness
+    and closeout. A receipt with a matching activation.closeout is closed; one with
+    none is preserved as dropout (never imputed as success or no-feedback), so
+    outcome-correlated dropout stays visible."""
+    receipts = [
+        event
+        for event in events
+        if event["event_type"] == "activation.receipt"
+        and (not skills or (event.get("skill") or {}).get("name") in skills)
+    ]
+    closeouts = {
+        event["payload"]["receipt_id"]: event["payload"]["closeout"]
+        for event in events
+        if event["event_type"] == "activation.closeout"
+    }
+    total = len(receipts)
+    closed = 0
+    by_closeout: dict[str, int] = {"dropout": 0}
+    by_harness: dict[str, dict[str, int]] = {}
+    for receipt in receipts:
+        harness = (receipt.get("session") or {}).get("harness") or "unknown"
+        harness_stats = by_harness.setdefault(
+            harness, {"total": 0, "closed": 0, "dropout": 0}
+        )
+        harness_stats["total"] += 1
+        receipt_id = receipt["payload"]["receipt_id"]
+        if receipt_id in closeouts:
+            closed += 1
+            harness_stats["closed"] += 1
+            label = closeouts[receipt_id]
+            by_closeout[label] = by_closeout.get(label, 0) + 1
+        else:
+            harness_stats["dropout"] += 1
+            by_closeout["dropout"] += 1
+    dropout = total - closed
+    return {
+        "total": total,
+        "closed": closed,
+        "dropout": dropout,
+        "completion_rate": round(closed / total, 3) if total else 0.0,
+        "dropout_rate": round(dropout / total, 3) if total else 0.0,
+        "by_closeout": by_closeout,
+        "by_harness": by_harness,
+    }
+
+
+def build_decision_strata(events: list[dict], skills: set[str]) -> dict:
+    """C5 (ADR 0022 D2): report decision/outcome coverage by the pre-action
+    stratum, sourcing every policy covariate ONLY from the frozen decision.logged
+    event (never from a later decision.outcome). An attached outcome that does not
+    strictly post-date its decision is a temporal anomaly (a potential
+    covariate/label leak) -- it is flagged and not counted as coverage."""
+    decisions = [
+        event
+        for event in events
+        if event["event_type"] == "decision.logged"
+        and (not skills or (event.get("skill") or {}).get("name") in skills)
+    ]
+    latest_outcome: dict[str, dict] = {}
+    for event in events:
+        if event["event_type"] != "decision.outcome":
+            continue
+        decision_id = event["payload"]["decision_id"]
+        prior = latest_outcome.get(decision_id)
+        if prior is None or _timestamp(event["occurred_at"]) >= _timestamp(
+            prior["occurred_at"]
+        ):
+            latest_outcome[decision_id] = event
+
+    strata: dict[str, dict] = {}
+    total_anomalies = 0
+    for decision in decisions:
+        payload = decision["payload"]
+        name = payload.get("task_stratum") or "unknown"
+        stratum = strata.setdefault(
+            name,
+            {
+                "decisions": 0,
+                "outcomes": 0,
+                "overlap_decisions": 0,
+                "temporal_anomalies": 0,
+                "difficulty_proxies": {},
+                "assignment_mechanisms": {},
+            },
+        )
+        stratum["decisions"] += 1
+        proxy = payload.get("difficulty_proxy") or "unknown"
+        stratum["difficulty_proxies"][proxy] = (
+            stratum["difficulty_proxies"].get(proxy, 0) + 1
+        )
+        mechanism = payload.get("assignment_mechanism") or "unknown"
+        stratum["assignment_mechanisms"][mechanism] = (
+            stratum["assignment_mechanisms"].get(mechanism, 0) + 1
+        )
+        probability = payload.get("chosen_action_probability")
+        if (
+            isinstance(probability, (int, float))
+            and not isinstance(probability, bool)
+            and probability < 1
+        ):
+            stratum["overlap_decisions"] += 1
+        outcome_event = latest_outcome.get(payload.get("decision_id"))
+        if outcome_event is not None:
+            if _timestamp(outcome_event["occurred_at"]) > _timestamp(
+                decision["occurred_at"]
+            ):
+                stratum["outcomes"] += 1
+            else:
+                stratum["temporal_anomalies"] += 1
+                total_anomalies += 1
+    for stratum in strata.values():
+        stratum["outcome_coverage_rate"] = (
+            round(stratum["outcomes"] / stratum["decisions"], 3)
+            if stratum["decisions"]
+            else 0.0
+        )
+    return {
+        "contract_version": STRATUM_CONTRACT_VERSION,
+        # covariates are read only from the frozen decision.logged event, whose
+        # occurred_at IS the decision time -- so every reported covariate was
+        # available strictly before action selection.
+        "covariate_source": "decision.logged",
+        "total_decisions": len(decisions),
+        "temporal_anomalies": total_anomalies,
+        "strata": dict(sorted(strata.items())),
+    }
+
+
+def _learner_acquisition() -> dict[str, dict]:
+    """C5 (ADR 0022 D9): actionable evidence-acquisition plans for the
+    separately gated 0007/0008 learners. These artifacts authorize acquisition
+    work only; emitting them never changes either learner's blocked status."""
+    return {
+        "0007": {
+            "task_ref": "0007",
+            "owner": "maintainer",
+            "max_acquisition_budget": 200,
+            "review_within_days": 7,
+            "learner_status": "blocked",
+            "unmet_gates": [
+                "corpus",
+                "holdout",
+                "baseline",
+                "uncertainty",
+                "privacy",
+                "workload",
+            ],
+            "requirements": {
+                "stratified_sampling": {
+                    "population": "eligible_notes",
+                    "strata": ["public", "private"],
+                    "method": "privacy-safe",
+                },
+                "duplicate_related_distinct_pairs": {
+                    "labels": ["duplicate", "related", "distinct"],
+                    "maintainer_reviewed": True,
+                    "self_labels_accepted": False,
+                },
+                "prechosen_holdout": {
+                    "reserved_before_model_work": True,
+                    "used_for_selection": False,
+                },
+                "baseline": {
+                    "declared": True,
+                    "measures": ["precision", "recall", "abstention"],
+                },
+                "annotation_workload_budget": {
+                    "cap": 200,
+                    "unit": "maintainer-minutes",
+                },
+                "stopping_rule": {
+                    "sequential": True,
+                    "predeclared": True,
+                    "criterion": "useful_uncertainty_bounds",
+                },
+            },
+        },
+        "0008": {
+            "task_ref": "0008",
+            "owner": "maintainer",
+            "max_acquisition_budget": 100,
+            "review_within_days": 14,
+            "learner_status": "blocked",
+            "unmet_gates": ["overlap", "full_causal_policy"],
+            "requirements": {
+                "prospective_decision_logging": {
+                    "decision_mechanism": "decision.logged",
+                    "outcome_mechanism": "decision.outcome",
+                    "decision_before_selection": True,
+                },
+                "overlap_diagnostics": {
+                    "strata": "pre_action",
+                    "coverage_reported": True,
+                },
+                "authorized_shadow_surface": {
+                    "authorization": "D8_pilot_record",
+                    "low_risk": True,
+                },
+                "bounded_rollout_kill_rollback": {
+                    "owner": "named_human",
+                    "kill_switch": "deterministic_outside_policy",
+                    "rollback": True,
+                },
+            },
+        },
+    }
+
+
+def build_readiness(
+    events: list[dict],
+    skills: set[str],
+    *,
+    abandoned: dict[str, str] | None = None,
+) -> dict:
+    """C5 (ADR 0022 D3): a computable prospective-evaluation readiness state
+    machine, separate from any learner. Each gate records its population,
+    calculation, owner, review window, and acquisition budget, and returns one of
+    `insufficient` / `proceed` / `abandon`. An `insufficient` gate deterministically
+    LINKS a bounded acquisition task (stable id derived from the gate) with a
+    scheduled review -- it is never a resting stall. `abandon` (an operator
+    override) requires a rationale and preserves descriptive-only operation.
+    D9 adds owned acquisition plans for the separately gated 0007/0008 learners;
+    they remain blocked regardless of this evaluation-readiness verdict."""
+    abandoned = abandoned or {}
+    strata = build_decision_strata(events, skills)
+    total = strata["total_decisions"]
+    overlap = sum(s["overlap_decisions"] for s in strata["strata"].values())
+    outcomes = sum(s["outcomes"] for s in strata["strata"].values())
+    overlap_rate = round(overlap / total, 3) if total else 0.0
+    outcome_rate = round(outcomes / total, 3) if total else 0.0
+
+    gates: list[dict] = []
+
+    def add_gate(
+        gate_id: str,
+        population: str,
+        measured: float,
+        required: float,
+        budget: int,
+        review_within_days: int,
+        scope: str,
+    ) -> None:
+        gate = {
+            "id": gate_id,
+            "owner": "maintainer",
+            "population": population,
+            "calculation": {"measured": measured, "required": required},
+            "max_acquisition_budget": budget,
+            "review_within_days": review_within_days,
+        }
+        if gate_id in abandoned:
+            gate["decision"] = "abandon"
+            gate["rationale"] = abandoned[gate_id]
+        elif measured >= required:
+            gate["decision"] = "proceed"
+        else:
+            gate["decision"] = "insufficient"
+            gate["acquisition_task"] = {
+                "id": f"acquisition:{gate_id}",
+                "scope": scope,
+                "owner": "maintainer",
+                "max_acquisition_budget": budget,
+                "review_within_days": review_within_days,
+            }
+        gates.append(gate)
+
+    add_gate(
+        "decision_logging",
+        f"{total} decisions logged",
+        total,
+        _MIN_READY_DECISIONS,
+        50,
+        7,
+        "log prospective decisions with full policy context before evaluation",
+    )
+    add_gate(
+        "assignment_overlap",
+        f"{overlap}/{total} decisions with assignment overlap (probability < 1)",
+        overlap_rate,
+        _MIN_OVERLAP_RATE,
+        100,
+        14,
+        "run an authorized randomized/interleaved pilot to create overlap",
+    )
+    add_gate(
+        "outcome_coverage",
+        f"{outcomes}/{total} decisions with a valid attached outcome",
+        outcome_rate,
+        _MIN_OUTCOME_COVERAGE_RATE,
+        100,
+        14,
+        "attach measured task-level outcomes under a named oracle",
+    )
+
+    decisions_made = {gate["decision"] for gate in gates}
+    if decisions_made == {"proceed"}:
+        overall = "proceed"
+    elif "insufficient" in decisions_made:
+        overall = "insufficient"
+    else:  # only proceed/abandon, at least one abandon
+        overall = "abandon"
+    return {
+        "policy_version": READINESS_POLICY_VERSION,
+        "overall": overall,
+        "gates": gates,
+        "learner_acquisition": _learner_acquisition(),
+    }
+
+
+# C5 (ADR 0022 D6): the versioned decision-profile contract. A profile is
+# task-specific and lexicographic; a universal weighted scalar is inadmissible.
+DECISION_PROFILE_VERSION = 1
+_PROFILE_RULES = ("superiority", "non_inferiority")
+_COMPARE_OPS = {
+    "==": lambda value, threshold: value == threshold,
+    "!=": lambda value, threshold: value != threshold,
+    "<=": lambda value, threshold: value <= threshold,
+    ">=": lambda value, threshold: value >= threshold,
+    "<": lambda value, threshold: value < threshold,
+    ">": lambda value, threshold: value > threshold,
+}
+
+
+def load_decision_profile(profile: dict) -> dict:
+    """C5 (ADR 0022 D6): validate and freeze a versioned decision profile.
+
+    A profile encodes lexicographic hard safety/privacy/budget constraints, ONE
+    primary outcome with a superiority/non-inferiority rule + margin, secondary
+    thresholds, an abstention policy, a NAMED human tie-break authority, and a
+    requirement to report a Pareto frontier + sensitivity. A universal weighted
+    scalar (a global leaderboard) is inadmissible, as is a profile without a named
+    tie-break or a well-formed primary rule. The returned block carries a
+    ``sha256`` over the canonical profile so it can be frozen into the manifest
+    before any candidate is evaluated (a post-hoc weight change re-freezes a
+    different manifest, never mutates the pinned one)."""
+    if not isinstance(profile, dict):
+        raise FeedbackError("decision profile must be a JSON object")
+    if profile.get("scalar_weights") is not None or profile.get("type") == (
+        "universal_scalar"
+    ):
+        raise FeedbackError(
+            "a universal weighted-scalar leaderboard is not an admissible decision "
+            "profile; declare lexicographic hard constraints + one primary rule"
+        )
+    primary = profile.get("primary_outcome")
+    if not isinstance(primary, dict) or not primary.get("metric"):
+        raise FeedbackError("decision profile requires a primary_outcome with a metric")
+    if primary.get("rule") not in _PROFILE_RULES:
+        raise FeedbackError(
+            f"decision profile primary_outcome.rule must be one of {_PROFILE_RULES}"
+        )
+    if not isinstance(primary.get("margin"), (int, float)) or isinstance(
+        primary.get("margin"), bool
+    ):
+        raise FeedbackError("decision profile primary_outcome.margin must be numeric")
+    tie_break = profile.get("tie_break")
+    if not isinstance(tie_break, dict) or not tie_break.get("authority"):
+        raise FeedbackError(
+            "decision profile requires a named human tie_break.authority"
+        )
+    requires = profile.get("requires") or {}
+    if not (requires.get("pareto") and requires.get("sensitivity")):
+        raise FeedbackError(
+            "decision profile must require both a Pareto frontier and a sensitivity "
+            "analysis (requires.pareto and requires.sensitivity)"
+        )
+    if not isinstance(profile.get("id"), str) or not isinstance(
+        profile.get("version"), int
+    ):
+        raise FeedbackError("decision profile requires a string id and an int version")
+    digest = hashlib.sha256(
+        json.dumps(profile, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    frozen = dict(profile)
+    frozen["policy_version"] = DECISION_PROFILE_VERSION
+    frozen["sha256"] = digest
+    return frozen
+
+
+def _metric_directions(profile: dict) -> dict[str, str]:
+    """Objective directions used for dominance/Pareto: the primary metric's declared
+    direction (default max), and each secondary metric inferred from its comparison
+    op (``<=``/``<`` minimise; ``>=``/``>`` maximise). ``==`` metrics are hard
+    equality constraints, not objectives, so they are excluded."""
+    directions: dict[str, str] = {}
+    primary = profile["primary_outcome"]
+    directions[primary["metric"]] = primary.get("direction", "max")
+    for threshold in profile.get("secondary_thresholds") or []:
+        op = threshold.get("op")
+        if op in ("<=", "<"):
+            directions.setdefault(threshold["metric"], "min")
+        elif op in (">=", ">"):
+            directions.setdefault(threshold["metric"], "max")
+    return directions
+
+
+def _dominates(a: dict, b: dict, directions: dict[str, str]) -> bool:
+    """True if candidate ``a`` weakly dominates ``b`` on every objective and strictly
+    beats it on at least one."""
+    strictly_better = False
+    for metric, direction in directions.items():
+        av, bv = a["metrics"].get(metric), b["metrics"].get(metric)
+        if av is None or bv is None:
+            return False
+        if direction == "max":
+            if av < bv:
+                return False
+            if av > bv:
+                strictly_better = True
+        else:
+            if av > bv:
+                return False
+            if av < bv:
+                strictly_better = True
+    return strictly_better
+
+
+def _primary_passes(candidate: dict, baseline: dict, primary: dict) -> bool:
+    metric, rule, margin = primary["metric"], primary["rule"], primary["margin"]
+    direction = primary.get("direction", "max")
+    value = candidate["metrics"].get(metric)
+    base = baseline["metrics"].get(metric)
+    if value is None or base is None:
+        return False
+    if direction == "max":
+        return (
+            value > base + margin if rule == "superiority" else value >= base - margin
+        )
+    return value < base - margin if rule == "superiority" else value <= base + margin
+
+
+def evaluate_promotion(profile: dict, candidates_doc: dict) -> dict:
+    """C5 (ADR 0022 D6): apply the frozen lexicographic decision profile to the
+    provided candidate metric bundles and return a computable, auditable promotion
+    verdict. Hard constraints eliminate first; then the primary rule/margin vs the
+    baseline; then the secondary thresholds. A single eligible (or single Pareto-
+    dominant) candidate is ``promote``; multiple incomparable eligibles route to the
+    named human ``tie_break``; none eligible is ``abstain``. This only applies a
+    frozen rule to given summaries -- it computes NO causal effect and invents no
+    counterfactual."""
+    if not isinstance(candidates_doc, dict):
+        raise FeedbackError("candidates document must be a JSON object")
+    by_name = {c["name"]: c for c in candidates_doc.get("candidates") or []}
+    baseline_name = candidates_doc.get("baseline")
+    if baseline_name not in by_name:
+        raise FeedbackError("candidates.baseline must name one of the candidates")
+    baseline = by_name[baseline_name]
+    primary = profile["primary_outcome"]
+    directions = _metric_directions(profile)
+
+    def hard_violations(candidate: dict) -> list[str]:
+        failed = []
+        for constraint in profile.get("hard_constraints") or []:
+            metric, op, threshold = (
+                constraint["metric"],
+                constraint["op"],
+                constraint["threshold"],
+            )
+            value = candidate["metrics"].get(metric)
+            if value is None or not _COMPARE_OPS[op](value, threshold):
+                failed.append(metric)
+        return failed
+
+    contenders = [name for name in by_name if name != baseline_name]
+    eliminated = [name for name in contenders if hard_violations(by_name[name])]
+    survivors = [name for name in contenders if name not in eliminated]
+
+    def secondary_ok(candidate: dict) -> bool:
+        for threshold in profile.get("secondary_thresholds") or []:
+            value = candidate["metrics"].get(threshold["metric"])
+            if value is None or not _COMPARE_OPS[threshold["op"]](
+                value, threshold["threshold"]
+            ):
+                return False
+        return True
+
+    def eligible_names(margin: float) -> list[str]:
+        scoped = dict(primary)
+        scoped["margin"] = margin
+        return [
+            name
+            for name in survivors
+            if _primary_passes(by_name[name], baseline, scoped)
+            and secondary_ok(by_name[name])
+        ]
+
+    eligible = eligible_names(primary["margin"])
+    if not eligible:
+        decision, winner = "abstain", None
+    elif len(eligible) == 1:
+        decision, winner = "promote", eligible[0]
+    else:
+        non_dominated = [
+            name
+            for name in eligible
+            if not any(
+                other != name and _dominates(by_name[other], by_name[name], directions)
+                for other in eligible
+            )
+        ]
+        if len(non_dominated) == 1:
+            decision, winner = "promote", non_dominated[0]
+        else:
+            decision, winner = "tie_break", None
+
+    # Pareto frontier over all candidates (incl. baseline) on the declared objectives.
+    all_names = list(by_name)
+    pareto = [
+        name
+        for name in all_names
+        if not any(
+            other != name and _dominates(by_name[other], by_name[name], directions)
+            for other in all_names
+        )
+    ]
+
+    # Sensitivity: does the eligible set (hence the winner) survive halving/doubling
+    # the primary margin? A decision that flips under a small margin change is fragile.
+    margin = primary["margin"]
+    perturbations = {
+        "margin_x0.5": sorted(eligible_names(margin * 0.5)),
+        "margin_x2": sorted(eligible_names(margin * 2)),
+    }
+    stable = all(set(names) == set(eligible) for names in perturbations.values())
+
+    result = {
+        "policy_version": DECISION_PROFILE_VERSION,
+        "profile_sha256": profile["sha256"],
+        "baseline": baseline_name,
+        "decision": decision,
+        "winner": winner,
+        "eliminated": eliminated,
+        "eligible": sorted(eligible),
+        "pareto_frontier": sorted(pareto),
+        "sensitivity": {"stable": stable, "eligible_at": perturbations},
+    }
+    if decision == "tie_break":
+        result["tie_break_authority"] = profile["tie_break"]["authority"]
+    return result
+
+
+def build_evaluation_manifest(
+    events: list[dict],
+    *,
+    as_of: str,
+    skills: set[str],
+    estimator: str | None = None,
+    target_policy: str = DEFAULT_TARGET_POLICY,
+    decision_profile: dict | None = None,
+    candidates: dict | None = None,
+    note_entries: list[dict] | None = None,
+) -> dict:
+    """C5 (ADR 0022 D4): a byte-stable immutable evaluation manifest.
+
+    A true ``as_of`` cutoff is applied CONSISTENTLY to every event class: only
+    events whose ``occurred_at`` is at or before the cutoff enter the evaluand, so
+    a later finish/label/disposition (which necessarily has a later timestamp) is
+    excluded and re-running the same ``as_of`` is byte-stable as the ledger grows.
+    A different ``as_of`` yields a distinct version_key -- a new version is produced
+    only by an explicit later cutoff, never by rewriting an old one. The ledger
+    digest is over the canonical, deterministically ordered included events.
+
+    When ``estimator`` is given (D5), a gated ``estimator_evaluation`` section is
+    added over the same cutoff population; when it is ``None`` the manifest is
+    byte-identical to the CP-4 manifest (the estimator layers on, never mutates)."""
+    cutoff = _timestamp(as_of)
+    normalized_as_of = cutoff.isoformat().replace("+00:00", "Z")
+    included = [
+        event
+        for event in events
+        if _timestamp(event["occurred_at"]) <= cutoff
+        and (not skills or (event.get("skill") or {}).get("name") in skills)
+    ]
+    # Tombstones live outside the evaluand, but a later deletion of an event whose
+    # prior timestamp falls inside this historical cutoff must still invalidate the
+    # manifest. Include that content-free evidence in the digest/version key even
+    # when the deletion itself happened after ``as_of``.
+    affecting_tombstones = [
+        event
+        for event, _ in _tombstones_in_window(
+            events,
+            after=None,
+            before=cutoff,
+            skills=skills,
+            before_inclusive=True,
+        )
+    ]
+    manifest_events = {event["event_id"]: event for event in included}
+    manifest_events.update({event["event_id"]: event for event in affecting_tombstones})
+    ordered = sorted(
+        manifest_events.values(),
+        key=lambda event: (event["occurred_at"], event["event_id"]),
+    )
+    canonical = "\n".join(json.dumps(event, sort_keys=True) for event in ordered)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    censoring = _build_censoring(
+        events,
+        after=None,
+        before=cutoff,
+        skills=skills,
+        before_inclusive=True,
+    )
+    ineligible_ids: set[str] = set()
+    if note_entries is not None:
+        effective, conflicts, orphans, _ = _reconcile_entries(
+            note_entries,
+            index=LedgerIndex.from_events(included),
+            include_event_orphans=True,
+        )
+        ineligible_ids.update(item["id"] for item in conflicts)
+        ineligible_ids.update(item["id"] for item in orphans)
+        ineligible_ids.update(
+            item["id"]
+            for item in effective
+            if item.get("_integrity", "unverified") != "verified"
+        )
+    ineligible_observation_ids = {
+        (event.get("payload") or {}).get("feedback_id")
+        for event in included
+        if event.get("event_type") == "observation.recorded"
+        and (event.get("payload") or {}).get("feedback_id") in ineligible_ids
+    }
+    evaluand = [
+        event
+        for event in included
+        if event.get("event_type") != "observation.tombstoned"
+        and not (
+            event.get("event_type") == "observation.recorded"
+            and (event.get("payload") or {}).get("feedback_id")
+            in ineligible_observation_ids
+        )
+    ]
+    event_counts: dict[str, int] = {}
+    for event in evaluand:
+        event_counts[event["event_type"]] = event_counts.get(event["event_type"], 0) + 1
+    manifest: dict[str, Any] = {
+        "manifest_version": EVALUATION_MANIFEST_VERSION,
+        "as_of": normalized_as_of,
+        "version_key": f"{normalized_as_of}:{digest[:12]}",
+        "maturation_rule": (
+            "events with occurred_at <= as_of enter the evaluand; later tombstones "
+            "whose deleted record falls inside the cutoff remain outside the "
+            "evaluand but invalidate its history. Origin-ineligible observations and "
+            "tombstones are excluded from population counts."
+        ),
+        "population": {
+            "skills": sorted(skills) if skills else None,
+            "total_events": len(evaluand),
+            "event_counts": dict(sorted(event_counts.items())),
+            "origin_ineligible": len(ineligible_observation_ids),
+        },
+        "ledger_digest": {
+            "algorithm": "sha256",
+            "canonicalization": "event-sorted-v1",
+            "sha256": digest,
+        },
+        "schema_versions": {
+            "event": EVENT_SCHEMA_VERSION,
+            "stratum": STRATUM_CONTRACT_VERSION,
+            "readiness": READINESS_POLICY_VERSION,
+        },
+        "censoring": censoring,
+        "origin_integrity": {
+            "status": "conflict"
+            if ineligible_observation_ids
+            else ("verified" if note_entries is not None else "unverified"),
+            "checked": note_entries is not None,
+            "ineligible_records": len(ineligible_observation_ids),
+        },
+        "decision_strata": build_decision_strata(evaluand, skills),
+    }
+    if estimator is not None:
+        manifest["estimator_evaluation"] = build_estimator_evaluation(
+            evaluand,
+            estimator=estimator,
+            target_policy=target_policy,
+            censored=censoring["post_deletion"],
+        )
+    if decision_profile is not None:
+        frozen = load_decision_profile(decision_profile)
+        manifest["decision_profile"] = frozen
+        manifest["schema_versions"]["decision_profile"] = DECISION_PROFILE_VERSION
+        if candidates is not None:
+            manifest["promotion_decision"] = evaluate_promotion(frozen, candidates)
+    return manifest
+
+
 def build_stats(
     events: list[dict],
     *,
@@ -269,8 +1365,14 @@ def build_stats(
     before: datetime | None,
     skills: set[str],
     group_by: tuple[str, ...],
+    allow_partial: bool = False,
 ) -> dict:
-    """Aggregate an invocation-start cohort and time-windowed observations."""
+    """Aggregate an invocation-start cohort and time-windowed observations.
+
+    When a group fails the comparison-readiness policy (ADR 0020 D4) its per-use
+    rates are suppressed and cross-skill ordering is withheld, unless
+    ``allow_partial`` opts into an explicitly non-comparable descriptive view.
+    """
     starts: dict[str, list[dict]] = defaultdict(list)
     finishes: dict[str, list[dict]] = defaultdict(list)
     for event in events:
@@ -314,6 +1416,17 @@ def build_stats(
         group = group_for(dimensions)
         population = group["population"]
         population["uses"] += 1
+        # C3 (ADR 0020 D3/D5): count this selected invocation as one
+        # capability.execution, stratify by harness capture mechanism, and record
+        # its decision episode (if any) for the executions-per-episode ratio.
+        population["capability_executions"] += 1
+        mechanism = start["payload"].get("capture_mechanism") or "unknown"
+        if mechanism not in group["capture_mechanisms"]:
+            mechanism = "unknown"
+        group["capture_mechanisms"][mechanism] += 1
+        episode_id = start["payload"].get("decision_episode_id")
+        if episode_id:
+            group["_decision_episode_ids"].add(episode_id)
         population["duplicate_start_events"] += len(ordered_starts) - 1
         population["conflicting_start_events"] += sum(
             _start_signature(event) != _start_signature(start)
@@ -394,14 +1507,19 @@ def build_stats(
         payload = event["payload"]
         group["observations"][payload["kind"]] += 1
         group["observations"][payload["signal"]] += 1
-        if not event.get("invocation_id"):
+        if event.get("invocation_id"):
+            group["observations"]["linked_to_invocation"] += 1
+        else:
             group["observations"]["unlinked_to_invocation"] += 1
         feedback_id = payload["feedback_id"]
+        disposition = dispositions.get(feedback_id)
+        is_preserved = bool(
+            disposition and disposition["payload"].get("status") == "preserve"
+        )
         preservation = group["preservation"]
         if payload["kind"] == "praise":
             preservation["praise"] += 1
-            disposition = dispositions.get(feedback_id)
-            if disposition and disposition["payload"]["status"] == "preserve":
+            if is_preserved:
                 preservation["preserved"] += 1
         # C2 (ADR 0018 R4): a declared test link counts as declared_with_test for
         # any kind; only a passing preservation receipt counts as verified.
@@ -409,6 +1527,61 @@ def build_stats(
             preservation["verified_with_test"] += 1
         elif feedback_id in declared_test_ids:
             preservation["declared_with_test"] += 1
+        # C4 (ADR 0021 D1/D3/D4): stratify by source tier and decide per-use-case
+        # downstream eligibility. A source tier alone never scores -- the
+        # observation must ALSO carry >=1 verified evidence receipt (D2) and meet
+        # the use-case condition. agent_judgment/automation are raw-only.
+        source = event.get("source")
+        group["_source_counts"][source] = group["_source_counts"].get(source, 0) + 1
+        receipts = payload.get("evidence_verification") or []
+        has_verified_evidence = any(
+            receipt.get("result") == "verified" for receipt in receipts
+        )
+        # C4 (ADR 0021 D5): tally record-time verification results for the group.
+        evidence_tally = group["evidence_verification"]
+        if receipts:
+            evidence_tally["observations_with_evidence"] += 1
+        for receipt in receipts:
+            evidence_tally["total_references"] += 1
+            result = receipt.get("result")
+            if result in EVIDENCE_RESULTS:
+                evidence_tally[result] += 1
+        # C4 (ADR 0021 D6): accumulate non-ignorable, privacy-correlated label
+        # missingness by the privacy-safe task-class stratum. Only content-free
+        # fields (screening outcome, label availability) are read.
+        stratum = (event.get("task") or {}).get("class") or "unknown"
+        privacy_stratum = group["_privacy_strata"].setdefault(
+            stratum, {"total": 0, "labeled": 0, "screening_outcomes": {}}
+        )
+        privacy_stratum["total"] += 1
+        if payload.get("label_available"):
+            privacy_stratum["labeled"] += 1
+        screening_outcome = (event.get("privacy") or {}).get("screening_outcome")
+        if screening_outcome:
+            privacy_stratum["screening_outcomes"][screening_outcome] = (
+                privacy_stratum["screening_outcomes"].get(screening_outcome, 0) + 1
+            )
+        outcome = payload.get("outcome")
+        use_case_condition = {
+            "preservation": is_preserved,
+            "recommendation": payload.get("signal") == "positive",
+            "user_preference": True,
+            "outcome": outcome not in (None, "unknown"),
+            "failure_prediction": outcome == "failure",
+        }
+        eligible_for_any = False
+        for use_case in ELIGIBILITY_USE_CASES:
+            if (
+                source_eligible_for(source, use_case)
+                and has_verified_evidence
+                and use_case_condition[use_case]
+            ):
+                group["eligible_aggregates"][use_case] += 1
+                eligible_for_any = True
+        if eligible_for_any:
+            group["_source_eligible"][source] = (
+                group["_source_eligible"].get(source, 0) + 1
+            )
 
     negative_after_praise = []
     praise_events = [
@@ -452,6 +1625,71 @@ def build_stats(
             group["rates_per_100_uses"][name] = (
                 round(100 * numerator / uses, 3) if uses else None
             )
+        # C3 (ADR 0020 D3/D5): observation link rate and the decision-episode ratio.
+        obs = group["observations"]
+        linked = obs["linked_to_invocation"]
+        total_obs = linked + obs["unlinked_to_invocation"]
+        group["observation_link_rate"] = (
+            round(linked / total_obs, 3) if total_obs else 0.0
+        )
+        episodes = group.pop("_decision_episode_ids")
+        executions = group["population"]["capability_executions"]
+        group["population"]["decision_episodes"] = len(episodes)
+        group["population"]["executions_per_episode"] = (
+            round(executions / len(episodes), 3) if episodes else 0.0
+        )
+        # C4 (ADR 0021 D3): source-stratified population, raw counts always
+        # visible and per-source eligible counts distinct from them.
+        source_counts = group.pop("_source_counts")
+        source_eligible = group.pop("_source_eligible")
+        raw_total = sum(source_counts.values())
+        group["source_distribution"] = {
+            "policy_version": EVIDENCE_ELIGIBILITY_POLICY_VERSION,
+            "raw_total": raw_total,
+            "by_source": {
+                source: {
+                    "count": count,
+                    "rate_pct": round(100 * count / raw_total, 3) if raw_total else 0.0,
+                    "eligible": source_eligible.get(source, 0),
+                    "classified_as": source,
+                }
+                for source, count in sorted(source_counts.items())
+            },
+            "eligible_total": sum(source_eligible.values()),
+        }
+        # C4 (ADR 0021 D6): per-stratum label coverage; a censored stratum
+        # abstains and never borrows a better-observed stratum's result.
+        privacy_strata = group.pop("_privacy_strata")
+        group["privacy_missingness"] = {
+            "policy_version": EVIDENCE_ELIGIBILITY_POLICY_VERSION,
+            "min_label_coverage": _MIN_LABEL_COVERAGE,
+            "strata": {
+                name: {
+                    "total": accumulator["total"],
+                    "labeled": accumulator["labeled"],
+                    "label_coverage_rate": (
+                        round(accumulator["labeled"] / accumulator["total"], 3)
+                        if accumulator["total"]
+                        else 0.0
+                    ),
+                    "abstain": (
+                        (accumulator["labeled"] / accumulator["total"])
+                        if accumulator["total"]
+                        else 0.0
+                    )
+                    < _MIN_LABEL_COVERAGE,
+                    "screening_outcomes": accumulator["screening_outcomes"],
+                    "borrowed_result": None,
+                }
+                for name, accumulator in sorted(privacy_strata.items())
+            },
+        }
+        # C3 (ADR 0020 D4): suppress non-comparable per-use rates unless the caller
+        # explicitly opts into a partial-descriptive view.
+        readiness = _comparison_readiness(group)
+        group["comparison_readiness"] = readiness
+        if not readiness["eligible"] and not allow_partial:
+            group.pop("rates_per_100_uses", None)
 
     ordered_groups = sorted(
         groups.values(),
@@ -460,8 +1698,29 @@ def build_stats(
             for value in group["dimensions"].values()
         ),
     )
+    # C3 (ADR 0020 D4): cross-skill ordering is withheld unless every group is
+    # comparison-ready; --allow-partial-descriptive emits a labelled non-comparable
+    # view instead. No `ranking` key is emitted while ordering is not ready.
+    all_eligible = all(
+        group["comparison_readiness"]["eligible"] for group in ordered_groups
+    )
+    if allow_partial:
+        cross_skill_ordering = {"status": "partial_descriptive"}
+        non_comparable = True
+    elif all_eligible and ordered_groups:
+        cross_skill_ordering = {"status": "ready"}
+        non_comparable = False
+    else:
+        cross_skill_ordering = {"status": "suppressed"}
+        non_comparable = True
     return {
         "version": 1,
+        "cross_skill_ordering": cross_skill_ordering,
+        "non_comparable": non_comparable,
+        "activation_receipts": build_activation_receipts(events, skills),
+        "censoring": _build_censoring(
+            events, after=after, before=before, skills=skills
+        ),
         "population": {
             "invocation_cohort": "earliest invocation.started in the selected window",
             "observation_cohort": "observation.recorded in the selected window",
@@ -557,12 +1816,30 @@ def build_closeout(events: list[dict], skill: str) -> dict:
         and event["payload"].get("verification_state") == "verified"
     }
 
+    # C4 (ADR 0021 D7): receipts whose verified check is artifact-bound (digest
+    # match). Only this subset is artifact-attested; the remainder is advisory.
+    bound_receipt_keys = {
+        (event["payload"]["feedback_id"], event["payload"]["receipt_id"])
+        for event in events
+        if event["event_type"] == "verification.recorded"
+        and (event.get("skill") or {}).get("name") == skill
+        and event["payload"].get("verification_state") == "verified"
+        and event["payload"].get("artifact_binding") == "bound"
+    }
+
     def _receipt_backed(disposition: dict, purpose: str) -> bool:
         payload = disposition["payload"]
         receipt_id = (payload.get("links") or {}).get("receipt")
         if not receipt_id:
             return False
         return verified_receipts.get((payload["feedback_id"], receipt_id)) == purpose
+
+    def _receipt_bound(disposition: dict) -> bool:
+        payload = disposition["payload"]
+        receipt_id = (payload.get("links") or {}).get("receipt")
+        return bool(
+            receipt_id and (payload["feedback_id"], receipt_id) in bound_receipt_keys
+        )
 
     # Historic verified closes (ADR 0019 D2/D5): a resolved disposition backed by a
     # verified resolution receipt, OR a preserve disposition backed by a verified
@@ -581,6 +1858,26 @@ def build_closeout(events: list[dict], skill: str) -> dict:
     }
     verified_ids = verified_resolved_ids | verified_preserved_ids
     verified_outflow = len(verified_ids)
+    # C4 (ADR 0021 D7): the artifact-bound subset of verified closes. verified_outflow
+    # still counts every verified close (legacy-compatible), but a consumer that
+    # requires artifact attestation reads verified_and_bound_outflow -- the unbound
+    # remainder trusts a check not bound to the artifact (the R3-1 residual).
+    verified_and_bound_ids = {
+        event["payload"]["feedback_id"]
+        for event in dispositions
+        if (
+            (
+                event["payload"].get("status") == "resolved"
+                and _receipt_backed(event, "resolution")
+            )
+            or (
+                event["payload"].get("status") == "preserve"
+                and _receipt_backed(event, "preservation")
+            )
+        )
+        and _receipt_bound(event)
+    }
+    verified_and_bound_outflow = len(verified_and_bound_ids)
     # A closing disposition (resolved or preserve) not backed by a verified receipt
     # of the matching purpose is a legacy/unverified close -- surfaced symmetrically
     # for both statuses rather than silently dropped (re-verify R3-2).
@@ -665,6 +1962,7 @@ def build_closeout(events: list[dict], skill: str) -> dict:
         "population": {
             "inflow": inflow,
             "verified_outflow": verified_outflow,
+            "verified_and_bound_outflow": verified_and_bound_outflow,
             "verified_resolved": len(verified_resolved_ids),
             "verified_preserved": len(verified_preserved_ids),
             "legacy_unverified_outflow": legacy_unverified_outflow,

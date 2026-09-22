@@ -15,6 +15,13 @@ superseded_by: ""
 
 # Template: TITLE
 
+<!-- Quality bar — write to the Template content standard
+the software-engineering skill knowledge file knowledge/documentation-meta-content-standards.md (section #template):
+hard-decision prompts surface the role's substance · fixed instructions separated from placeholders ·
+strike/anti-filler cues · a generic one-role form. Discriminating test: do the prompts surface the
+role's hardest decisions and make omission/filler visible when a real author fills the template?
+Delete this comment once the template is written. -->
+
 ## Purpose
 
 What this template produces and when an author should use it. Replace the title placeholder.

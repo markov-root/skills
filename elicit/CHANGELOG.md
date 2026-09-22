@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 — 2026-08-19
+
+Add an evaluation & feedback contract (ADR 0003) — this skill has no
+deterministic anchor, so it must be improved on user-anchored evidence, not agent
+self-judgment.
+
+- New `knowledge/evaluation.md` — why the skill can't grade itself, the
+  evidence-trust order (deterministic outcome → observed → explicit → independent),
+  a per-episode calibration log (question→answer divergence, later-falsified
+  assumptions) that distinguishes over- from under-asking, and the policy that
+  `agent_judgment` is low-trust here.
+- `SKILL.md` — new "Improving this skill" section routing to it; instructs honest
+  `skill-feedback --source` and no self-praise. (task: 0001)
+
 ## 0.2.0 — 2026-08-18
 
 Broadened scope from coding-specific requirements to **domain-general

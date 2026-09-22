@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shlex
 import subprocess
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -12,11 +13,19 @@ from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from ..documents.validation import expand_markdown_paths, validate_documents
-from ..policy.manifest import Check, Manifest, ReviewerDeclaration
+from ..documents.contracts import GENERIC_ROLES
+from ..documents.markdown import DocFinding
+from ..documents.validation import (
+    expand_markdown_paths,
+    scan_typed_documents,
+    validate_adopted_documents,
+    validate_documents,
+)
+from ..policy.document_paths import DocumentContainment
+from ..policy.manifest import Check, Manifest, ManifestV2, ReviewerDeclaration
+from ..policy.project_root import load_explicit_manifest, resolve_explicit_project_root
 from ..project.classifier import Change, classify_changes, git_changes, git_commit
-from ..project.context import load_adopted_project
-from ..project.discovery import discover_instructions, discover_project
+from ..project.discovery import Project, discover_instructions
 from ..reviewers.semantic import build_review_packet, run_review
 from ..verification.checks import CheckResult, inspect_check_executable, run_check
 from ..verification.fitness import Selection, select_affected, validate_fitness
@@ -93,9 +102,9 @@ def _identity(
     profile: str,
     tools: Sequence[ToolIdentity],
     *,
-    repository_state: tuple[str | None, str] | None = None,
+    repository_state: tuple[str | None, str],
 ) -> BaselineIdentity:
-    commit, dirty_fingerprint = repository_state or _repository_state(root)
+    commit, dirty_fingerprint = repository_state
     return BaselineIdentity(
         str(root.resolve()),
         commit,
@@ -108,14 +117,22 @@ def _identity(
 
 
 def _repository_state(root: Path) -> tuple[str | None, str]:
-    try:
-        paths = [
-            change.path
-            for change in git_changes(root)
-            if change.path != ".engineering" and not change.path.startswith(".engineering/")
-        ]
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        paths = []
+    """Commit + project-scoped dirty change fingerprint.
+
+    Task 0105: non-Git projects honestly have no Git change context (empty change
+    fingerprint). Inside a real repository, changes are scoped to the project via
+    the existing project-relative filtering (repo-relative change names must not
+    be resolved against a nested project root, sibling projects must not leak,
+    and the project's own generated `.engineering` is excluded), and discovery
+    failures PROPAGATE with their original diagnostics — identity call sites
+    translate them into an explicit unavailable result before sealing anything.
+    """
+    changes = _project_changes(root)
+    paths = [
+        change.path
+        for change in changes
+        if change.path != ".engineering" and not change.path.startswith(".engineering/")
+    ]
     return git_commit(root), fingerprint_paths(root, paths)
 
 
@@ -163,15 +180,14 @@ def _recovery_code(value: str) -> str:
 
 
 def _authority(
-    project_root: Path,
-    manifest_path: Path,
-    start_path: str | Path,
+    project: Project,
     global_agents: str | Path | None,
     *,
     refuse_drift: bool = True,
 ) -> tuple[AuthorityRecord, ...]:
-    project = discover_project(start_path)
-    instructions = discover_instructions(project, start_path, global_agents=global_agents)
+    project_root = project.root
+    manifest_path = project.manifest
+    instructions = discover_instructions(project, project_root, global_agents=global_agents)
     if refuse_drift and any(item.drift for item in instructions):
         raise ValueError("instruction drift must be resolved before starting a run")
     authority = [
@@ -200,11 +216,57 @@ def _authority(
 
 
 def _project_changes(root: Path) -> tuple[Change, ...]:
+    git_root = _git_root(root)
+    if git_root is None:
+        return ()
+    prefix = root.resolve().relative_to(git_root).as_posix()
+    scoped: list[Change] = []
+    for item in git_changes(git_root):
+        path = _relative_git_path(item.path, prefix)
+        old_path = _relative_git_path(item.old_path, prefix) if item.old_path else None
+        if path is None and old_path is None:
+            continue
+        scoped.append(Change(path or old_path or item.path, item.status, old_path))
     return tuple(
         item
-        for item in git_changes(root)
+        for item in dict.fromkeys(scoped)
         if item.path != ".engineering" and not item.path.startswith(".engineering/")
     )
+
+
+def _git_root(root: Path) -> Path | None:
+    try:
+        result = subprocess.run(
+            ("git", "-C", str(root), "rev-parse", "--show-toplevel"),
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or len(result.stdout) > 16_384:
+        return None
+    value = result.stdout.decode(errors="replace").strip()
+    return Path(value).resolve() if value else None
+
+
+def _relative_git_path(path: str | None, prefix: str) -> str | None:
+    if path is None:
+        return None
+    if prefix in {"", "."}:
+        return path
+    if path == prefix:
+        return "."
+    marker = f"{prefix}/"
+    return path[len(marker) :] if path.startswith(marker) else None
+
+
+def _exact_project(start: str | Path) -> tuple[Path, Manifest, Project, dict[str, object]]:
+    resolution = resolve_explicit_project_root(start)
+    manifest = load_explicit_manifest(resolution, required=True)
+    assert manifest is not None
+    project = Project(resolution.root, manifest.path, _git_root(resolution.root))
+    return resolution.root, manifest, project, resolution.to_dict()
 
 
 def _selection_plan(
@@ -265,10 +327,9 @@ def start_run(
 ) -> WorkflowResult:
     if not intent.strip():
         raise ValueError("intent must not be empty")
-    adopted = load_adopted_project(start)
-    root, manifest, project = adopted.root, adopted.manifest, adopted.discovery
+    root, manifest, project, root_resolution = _exact_project(start)
     requested_paths = _validate_requested_paths(paths)
-    authority = _authority(root, manifest.path, start, global_agents)
+    authority = _authority(project, global_agents)
     try:
         preexisting = _project_changes(root) if project.git_root is not None else ()
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
@@ -277,8 +338,9 @@ def start_run(
     prospective = tuple(
         Change(path, "intent") for path in requested_paths if path not in known_paths
     )
+    scoped_preexisting = _declared_changes(preexisting, requested_paths)
     classifications = classify_changes(
-        (*preexisting, *prospective),
+        (*scoped_preexisting, *prospective),
         manifest.classifiers,
         manifest.approval_required,
     )
@@ -290,7 +352,10 @@ def start_run(
     selected_checks = tuple(
         manifest.checks[name] for name in manifest.checks if check_selections[name].selected
     )
-    repository_state = _repository_state(root)
+    try:
+        repository_state = _repository_state(root)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        return WorkflowResult("unavailable", root, {"reason": str(exc)})
     tools = _tool_identities_for_checks(selected_checks, root)
     identity = _identity(root, manifest, "start", tools, repository_state=repository_state)
     results = tuple(run_check(check, root) for check in selected_checks)
@@ -339,12 +404,13 @@ def start_run(
         root,
         {
             "run_id": selected_run_id,
+            "root_resolution": root_resolution,
             "baseline": baseline_path.relative_to(root).as_posix(),
             "start": start_path.relative_to(root).as_posix(),
             "record": asdict(start_record),
             "results": [result.to_dict() for result in results],
         },
-        render_start(start_record),
+        render_start(start_record, root),
     )
 
 
@@ -368,6 +434,167 @@ def _within_declared_scope(path: str, requested: Sequence[str]) -> bool:
     return any(path == item or path.startswith(f"{item.rstrip('/')}/") for item in requested)
 
 
+def _declared_changes(changes: Sequence[Change], requested: Sequence[str]) -> tuple[Change, ...]:
+    if not requested:
+        return tuple(changes)
+    return tuple(
+        item
+        for item in changes
+        if _within_declared_scope(item.path, requested)
+        or (item.old_path is not None and _within_declared_scope(item.old_path, requested))
+    )
+
+
+def _committed_paths_between(root: Path, before: str, after: str) -> tuple[str, ...]:
+    git_root = _git_root(root)
+    if git_root is None:
+        return ()
+    prefix = root.resolve().relative_to(git_root).as_posix()
+    pathspec = prefix if prefix not in {"", "."} else "."
+    try:
+        result = subprocess.run(
+            (
+                "git",
+                "-C",
+                str(git_root),
+                "diff",
+                "--name-status",
+                "-z",
+                "-M",
+                before,
+                after,
+                "--",
+                pathspec,
+            ),
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("could not compare concurrent Git commits") from exc
+    if result.returncode != 0 or len(result.stdout) > 10_000_000:
+        raise RuntimeError(
+            result.stderr.decode(errors="replace").strip()
+            or "could not compare concurrent Git commits"
+        )
+    paths: list[str] = []
+    fields = result.stdout.decode(errors="surrogateescape").split("\0")
+    index = 0
+    while index < len(fields) and fields[index]:
+        status = fields[index]
+        index += 1
+        count = 2 if status.startswith(("R", "C")) else 1
+        for raw in fields[index : index + count]:
+            relative = _relative_git_path(raw, prefix)
+            if relative is not None:
+                paths.append(relative)
+        index += count
+    return tuple(sorted(set(paths)))
+
+
+def _baseline_is_ancestor(root: Path, before: str, after: str) -> bool:
+    git_root = _git_root(root)
+    if git_root is None:
+        raise RuntimeError("could not resolve the Git root for concurrent history validation")
+    try:
+        result = subprocess.run(
+            ("git", "-C", str(git_root), "merge-base", "--is-ancestor", before, after),
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("could not validate concurrent Git history") from exc
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise RuntimeError(
+        result.stderr.decode(errors="replace").strip()
+        or "could not validate concurrent Git history"
+    )
+
+
+def _head_advance(
+    root: Path,
+    baseline_commit: str | None,
+    current_commit: str | None,
+    requested: Sequence[str],
+) -> dict[str, Any]:
+    if baseline_commit == current_commit:
+        return {
+            "status": "unchanged",
+            "baseline_commit": baseline_commit,
+            "current_commit": current_commit,
+            "committed_paths": [],
+            "declared_path_changes": [],
+        }
+    if baseline_commit is None or current_commit is None:
+        return {
+            "status": "conflict",
+            "baseline_commit": baseline_commit,
+            "current_commit": current_commit,
+            "committed_paths": [],
+            "declared_path_changes": list(requested),
+            "reason": "repository commit identity became unavailable",
+        }
+    baseline_is_ancestor = _baseline_is_ancestor(root, baseline_commit, current_commit)
+    committed = _committed_paths_between(root, baseline_commit, current_commit)
+    overlapping = (
+        tuple(path for path in committed if _within_declared_scope(path, requested))
+        if requested
+        else committed
+    )
+    if not baseline_is_ancestor:
+        return {
+            "status": "conflict",
+            "baseline_commit": baseline_commit,
+            "current_commit": current_commit,
+            "committed_paths": list(committed),
+            "declared_path_changes": list(overlapping),
+            "reason": "baseline commit is not an ancestor of current HEAD",
+        }
+    return {
+        "status": "conflict" if overlapping else "benign",
+        "baseline_commit": baseline_commit,
+        "current_commit": current_commit,
+        "committed_paths": list(committed),
+        "declared_path_changes": list(overlapping),
+        "reason": (
+            "concurrent commits changed declared run paths"
+            if overlapping
+            else "HEAD advanced only outside the declared run paths"
+        ),
+    }
+
+
+def _head_recovery_commands(
+    root: Path,
+    start_record: StartRecord,
+    head_advance: dict[str, Any],
+) -> list[str]:
+    paths = tuple(head_advance.get("declared_path_changes", ()))
+    before = head_advance.get("baseline_commit")
+    after = head_advance.get("current_commit")
+    commands = []
+    if before and after and paths:
+        commands.append(
+            "git diff "
+            f"{shlex.quote(str(before))}..{shlex.quote(str(after))} -- "
+            + " ".join(shlex.quote(path) for path in paths)
+        )
+    restart = (
+        "engineering start --intent "
+        f"{shlex.quote(start_record.intent)} --project-root {shlex.quote(str(root))}"
+    )
+    if start_record.requested_paths:
+        restart += " --paths " + " ".join(
+            shlex.quote(path) for path in start_record.requested_paths
+        )
+    commands.append(restart)
+    return commands
+
+
 def _finish_validations(
     root: Path,
     manifest: Manifest,
@@ -383,10 +610,32 @@ def _finish_validations(
     )[0]
     if docs_selection.selected:
         paths = expand_markdown_paths(root, manifest.docs.include or ("**/*.md",))
-        for item in validate_documents(root, manifest.docs, paths):
-            facts.append(
-                ValidationFact("docs", item.code, f"{item.path}:{item.line}", item.message)
+        normalized_actual_paths = tuple(
+            item
+            for path in actual_paths
+            if (item := _normalized_project_path(root, path)) is not None
+        )
+        if isinstance(manifest, ManifestV2):
+            _finish_v2_document_validations(
+                facts,
+                root,
+                manifest,
+                paths,
+                actual_paths,
+                normalized_actual_paths,
+                full=full,
             )
+        else:
+            for item in validate_documents(root, manifest.docs, paths):
+                finding_path = _normalized_project_path(root, item.path)
+                if actual_paths and not (
+                    finding_path is not None
+                    and _within_declared_scope(finding_path, normalized_actual_paths)
+                ):
+                    continue
+                facts.append(
+                    ValidationFact("docs", item.code, f"{item.path}:{item.line}", item.message)
+                )
     generated = generated_from_manifest(manifest)
     generated_selections = {
         item.check: item
@@ -409,6 +658,107 @@ def _finish_validations(
                 )
             )
     return tuple(facts)
+
+
+def _finish_v2_document_validations(
+    facts: list[ValidationFact],
+    root: Path,
+    manifest: ManifestV2,
+    paths: Sequence[str],
+    actual_paths: Sequence[str],
+    normalized_actual_paths: Sequence[str],
+    *,
+    full: bool,
+) -> None:
+    repository_root = root.resolve()
+    if repository_root != manifest.path.parent.resolve():
+        raise AssertionError("manifest-v2 finish root must remain the manifest repository root")
+    global_containment = DocumentContainment.for_global(repository_root)
+    global_scan = scan_typed_documents(
+        repository_root,
+        manifest.docs.currency,
+        containment=global_containment,
+    )
+    _append_finish_doc_facts(
+        facts,
+        validate_documents(
+            repository_root,
+            manifest.docs,
+            paths,
+            containment=global_containment,
+            typed_scan=global_scan,
+        ),
+        repository_root,
+        actual_paths,
+        normalized_actual_paths,
+        source="docs:global",
+    )
+    global_identities = frozenset(
+        f"{record.metadata['role']}:{record.metadata['id']}"
+        for record in global_scan.records
+        if record.metadata.get("role") in GENERIC_ROLES
+    )
+    for scope in manifest.document_projects.projects:
+        docs_root = scope.docs_root.relative_to(repository_root).as_posix()
+        affected = full or any(
+            _paths_intersect(path, docs_root) for path in normalized_actual_paths
+        )
+        if not affected:
+            continue
+        containment = DocumentContainment.for_scope(repository_root, scope)
+        scan = scan_typed_documents(
+            repository_root,
+            scope.currency,
+            containment=containment,
+            extra_known_identities=global_identities,
+        )
+        _append_finish_doc_facts(
+            facts,
+            validate_adopted_documents(
+                repository_root,
+                scope.currency,
+                containment=containment,
+                extra_known_identities=global_identities,
+                typed_scan=scan,
+            ),
+            repository_root,
+            actual_paths,
+            normalized_actual_paths,
+            source=f"docs:{scope.id}",
+        )
+
+
+def _append_finish_doc_facts(
+    facts: list[ValidationFact],
+    findings: Sequence[DocFinding],
+    root: Path,
+    actual_paths: Sequence[str],
+    normalized_actual_paths: Sequence[str],
+    *,
+    source: str,
+) -> None:
+    for item in findings:
+        finding_path = _normalized_project_path(root, item.path)
+        # Scope selection is an optimization; this per-finding filter is the correctness boundary.
+        if actual_paths and not (
+            finding_path is not None
+            and _within_declared_scope(finding_path, normalized_actual_paths)
+        ):
+            continue
+        facts.append(ValidationFact(source, item.code, f"{item.path}:{item.line}", item.message))
+
+
+def _paths_intersect(left: str, right: str) -> bool:
+    return _within_declared_scope(left, (right,)) or _within_declared_scope(right, (left,))
+
+
+def _normalized_project_path(root: Path, value: str) -> str | None:
+    candidate = Path(value)
+    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
 
 
 def _reviewer_blocking(declaration: ReviewerDeclaration) -> tuple[bool, str]:
@@ -437,8 +787,7 @@ def finish_run(
         or any(character in run_id for character in ("/", "\\", "\x00"))
     ):
         raise LifecycleError("invalid run id")
-    adopted = load_adopted_project(start)
-    root, manifest, project = adopted.root, adopted.manifest, adopted.discovery
+    root, manifest, project, root_resolution = _exact_project(start)
     run_directory = root / ".engineering" / "runs" / run_id
     baseline = read_baseline(run_directory / "baseline.json")
     start_record = read_start(run_directory / "start.json")
@@ -451,27 +800,45 @@ def finish_run(
         None,
     )
     current_authority = _authority(
-        root,
-        manifest.path,
-        start,
+        project,
         global_agents or sealed_global,
         refuse_drift=False,
     )
     authority_changes = _authority_changes(start_record.authority, current_authority)
     if authority_changes:
+        recovery = _head_recovery_commands(
+            root,
+            start_record,
+            {
+                "baseline_commit": baseline.identity.commit,
+                "current_commit": git_commit(root),
+                "declared_path_changes": [],
+            },
+        )
         return WorkflowResult(
             "incompatible",
             root,
             {
                 "run_id": run_id,
+                "root_resolution": root_resolution,
                 "incompatible_fields": ["authority"],
                 "authority_changes": list(authority_changes),
+                "next_commands": recovery,
             },
+            "\n".join(
+                (
+                    f"Traversal root: `{root}`",
+                    "Authority changed after this run started.",
+                    "Review the authority drift, then start a replacement run:",
+                    *(f"- `{command}`" for command in recovery),
+                )
+            ),
         )
     try:
-        actual_changes = _project_changes(root) if project.git_root is not None else ()
+        all_actual_changes = _project_changes(root) if project.git_root is not None else ()
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         return WorkflowResult("unavailable", root, {"reason": str(exc)})
+    actual_changes = _declared_changes(all_actual_changes, start_record.requested_paths)
     actual_paths = tuple(item.path for item in actual_changes)
     check_selections, fitness_plans = _selection_plan(manifest, root, actual_paths, full=full)
     reviewer_declarations = tuple(manifest.reviewers.values())
@@ -485,7 +852,10 @@ def finish_run(
     selected_checks = tuple(
         manifest.checks[name] for name in manifest.checks if check_selections[name].selected
     )
-    repository_state = _repository_state(root)
+    try:
+        repository_state = _repository_state(root)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        return WorkflowResult("unavailable", root, {"reason": str(exc)})
     tools = _tool_identities_for_checks(selected_checks, root)
     baseline_tool_names = {item.check for item in baseline.tools}
     compatibility_tools = tuple(item for item in tools if item.check in baseline_tool_names)
@@ -496,12 +866,37 @@ def finish_run(
         compatibility_tools,
         repository_state=repository_state,
     )
-    incompatible = incompatibilities(baseline.identity, compatibility_identity)
+    head_advance = _head_advance(
+        root,
+        baseline.identity.commit,
+        compatibility_identity.commit,
+        start_record.requested_paths,
+    )
+    incompatible = list(incompatibilities(baseline.identity, compatibility_identity))
+    if "commit" in incompatible and head_advance["status"] == "benign":
+        incompatible.remove("commit")
+    elif "commit" in incompatible and head_advance["status"] == "conflict":
+        incompatible[incompatible.index("commit")] = "declared_paths"
     if incompatible:
+        recovery = _head_recovery_commands(root, start_record, head_advance)
         return WorkflowResult(
             "incompatible",
             root,
-            {"run_id": run_id, "incompatible_fields": list(incompatible)},
+            {
+                "run_id": run_id,
+                "root_resolution": root_resolution,
+                "incompatible_fields": list(dict.fromkeys(incompatible)),
+                "head_advance": head_advance,
+                "next_commands": recovery,
+            },
+            "\n".join(
+                (
+                    f"Traversal root: `{root}`",
+                    "The run overlaps a concurrent committed change in its declared paths.",
+                    "Inspect/reconcile that change, then start a replacement run:",
+                    *(f"- `{command}`" for command in recovery),
+                )
+            ),
         )
     results = tuple(run_check(check, root) for check in selected_checks)
     result_by_name = {item.name: item for item in results}
@@ -519,11 +914,23 @@ def finish_run(
             CheckPlan(name, selection.selected, selection.reason, check_record.status)
         )
     try:
-        final_changes = _project_changes(root) if project.git_root is not None else ()
+        all_final_changes = _project_changes(root) if project.git_root is not None else ()
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         return WorkflowResult("unavailable", root, {"reason": str(exc)})
+    final_changes = _declared_changes(all_final_changes, start_record.requested_paths)
     final_paths = tuple(item.path for item in final_changes)
-    final_selections, final_fitness_plans = _selection_plan(manifest, root, final_paths, full=full)
+    preexisting_paths = {item.path for item in start_record.preexisting_changes}
+    unexpected_changes = tuple(
+        item
+        for item in all_final_changes
+        if item.path not in preexisting_paths
+        and not _within_declared_scope(item.path, start_record.requested_paths)
+    )
+    relevant_changes = tuple(dict.fromkeys((*final_changes, *unexpected_changes)))
+    relevant_paths = tuple(item.path for item in relevant_changes)
+    final_selections, final_fitness_plans = _selection_plan(
+        manifest, root, relevant_paths, full=full
+    )
     late_applicable: list[str] = []
     for index, plan in enumerate(check_plans):
         if not plan.selected and final_selections[plan.name].selected:
@@ -540,7 +947,7 @@ def finish_run(
         for initial_plan, final_plan in zip(fitness_plans, final_fitness_plans, strict=True)
     )
     classifications = classify_changes(
-        final_changes,
+        relevant_changes,
         manifest.classifiers,
         manifest.approval_required,
     )
@@ -548,7 +955,13 @@ def finish_run(
         dict.fromkeys(item.category for item in classifications if item.approval_required)
     )
     validations = _finish_validations(root, manifest, final_paths, full=full)
-    final_identity = _identity(root, manifest, "start", tools)
+    try:
+        final_repository_state = _repository_state(root)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        return WorkflowResult("unavailable", root, {"reason": str(exc)})
+    final_identity = _identity(
+        root, manifest, "start", tools, repository_state=final_repository_state
+    )
     evidence_items = compare(baseline.checks, final_checks)
     evidence_facts = tuple(
         EvidenceFact(
@@ -559,15 +972,7 @@ def finish_run(
         )
         for item in evidence_items
     )
-    preexisting_paths = {item.path for item in start_record.preexisting_changes}
-    unexpected_paths = tuple(
-        sorted(
-            item.path
-            for item in final_changes
-            if item.path not in preexisting_paths
-            and not _within_declared_scope(item.path, start_record.requested_paths)
-        )
-    )
+    unexpected_paths = tuple(sorted(item.path for item in unexpected_changes))
     start_classifications = {(item.category, item.path) for item in start_record.classifications}
     scope_expansions = tuple(
         sorted(
@@ -655,7 +1060,7 @@ def finish_run(
                 profile,
                 intent=start_record.intent,
                 requested_paths=start_record.requested_paths,
-                actual_changes=tuple(asdict(item) for item in final_changes),
+                actual_changes=tuple(asdict(item) for item in relevant_changes),
                 classifications=tuple(asdict(item) for item in classifications),
                 evidence=review_evidence,
                 included_evidence=included_review_evidence,
@@ -733,7 +1138,7 @@ def finish_run(
         authority=current_authority,
         authority_changes=authority_changes,
         actual_changes=tuple(
-            ChangeFact(item.path, item.status, item.old_path) for item in final_changes
+            ChangeFact(item.path, item.status, item.old_path) for item in relevant_changes
         ),
         classifications=tuple(
             ClassificationFact(
@@ -801,9 +1206,11 @@ def finish_run(
         root,
         {
             "run_id": run_id,
+            "root_resolution": root_resolution,
+            "head_advance": head_advance,
             "final": final_path.relative_to(root).as_posix(),
             "record": asdict(finish_record),
             "summary": evidence_json(evidence_items)["summary"],
         },
-        render_finish(finish_record),
+        render_finish(finish_record, root),
     )

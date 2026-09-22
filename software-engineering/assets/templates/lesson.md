@@ -13,6 +13,7 @@ supersedes: ""
 superseded_by: ""
 engineering_document:
   version: 1
+  contract_tier: full
   role: lesson
   id: "NNNN"
   uid: lesson-YYYYMMDDTHHMMSSffffffZ-RANDOM8
@@ -33,6 +34,13 @@ engineering_document:
 ---
 
 # Lesson NNNN: Durable lesson
+
+<!-- Quality bar — write to the Lesson content standard
+the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #lesson):
+an actionable inference with a mechanism beyond chronology · provenance and maturity · retrieval cue,
+applicability boundary, and counter-signal so it transfers without over-application · consequence
+named. Discriminating test: does it change a competent reader's future judgment while preventing
+transfer to a merely similar-looking case? Delete this comment once the lesson is written. -->
 
 ## Context
 

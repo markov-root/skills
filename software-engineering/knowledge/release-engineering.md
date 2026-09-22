@@ -87,6 +87,41 @@ environment, dependency resolution, timestamps, platform targets, flags, and sig
 outputs. Treat reproducible-build evidence as an explicit artifact of the build, not as an assumption
 inferred from Git.
 
+## Release Payload Membership
+
+**Project default:** A release payload is a **declared export boundary** — an explicit decision
+about which files, packages, or artifacts consumers receive — not "whatever the repository tracks."
+Name the boundary per payload (package manifest, install allowlist, image context, archive file
+list) and review it like any release input. The trade-off is maintenance; the counterexample is a
+repo whose build exports an allowlist by design and never needs the boundary restated per release.
+
+Three populations are independent, and a release may draw its payload from any of them:
+
+| Population | What it contains | Example shape |
+| --- | --- | --- |
+| Private development source | Operational records, agent/session notes, internal runbooks alongside the code | A repo that publishes only an allowlisted subtree (e.g. a distribution folder) from private source |
+| Public source repository | Contributor-facing decisions, tasks, plans, and documentation | An open-source repo whose ADRs and contribution history are intentionally public records |
+| Installed / runtime payload | What a consumer actually receives and needs to operate | A package, image, or installer that rarely needs decision history at all |
+
+**Project default:** Decide membership per payload need, not per role label. Decision history and
+operational records are usually development-source material; a public source repository may
+legitimately include useful contributor-facing records of the same kinds; an installed payload
+typically includes neither. Sensitivity follows content, not labels: keep credentials out of Git,
+and retain other restricted detail only where its purpose, permissions, and access boundary justify
+it. Private access does not make every kind of content safe to commit or redistribute.
+
+**Heuristic:** "It is tracked" and "it was ever committed" do not imply "it ships." Review hygiene
+claims against the declared export, not the working tree, `.gitignore` state, or Git history.
+Ignore state alone establishes no exclusion — an explicit export exclusion does. The declared
+boundary also states *intended* membership, not proof of delivery: verify the actual built
+artifact against the declaration before claiming what shipped. Git tracking and history mechanics
+are covered in [git and versioning](git-and-versioning.md); the audience judgment for
+contributor-facing records in [documentation structure](documentation-structure.md).
+
+Counterexamples: a container image built from a context that swept credentials first; a package
+that accidentally publishes internal operational notes because it ships its whole source tree;
+a source archive that is the artifact itself, where the export boundary is the archive's file list.
+
 ## Version and Compatibility Policy
 
 **Standard/fact (verified 2026-08-05):** Semantic Versioning 2.0.0 defines major, minor, and patch

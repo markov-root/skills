@@ -15,6 +15,13 @@ superseded_by: ""
 
 # Reference: TITLE
 
+<!-- Quality bar — write to the Reference content standard
+the software-engineering skill knowledge file knowledge/documentation-living-content-standards.md (section #reference):
+findable entry structure · declared canonical source with version/date · exact values/defaults ·
+freshness and coverage bounds · derivation markers. Discriminating test: can a reader land on the
+exact fact and confirm it against the declared source without re-searching or re-deriving it? Delete
+this comment once the reference is written. -->
+
 ## Purpose
 
 What this reference is for and when to consult it rather than rederive it. Replace the title

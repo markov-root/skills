@@ -17,8 +17,10 @@ from ..commands import (
     install_hooks,
     instructions,
     knowledge,
+    record,
     start,
     suggest_manifest,
+    task,
 )
 from ..commands.contracts import (
     ACTIVE_SCAN,
@@ -47,8 +49,10 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     generated.SPEC,
     docs.SPEC,
     document.SPEC,
+    task.SPEC,
     knowledge.SPEC,
     explain.SPEC,
+    record.SPEC,
 )
 COMMANDS = tuple(spec.name for spec in COMMAND_SPECS)
 COMMAND_BY_NAME = {spec.name: spec for spec in COMMAND_SPECS}

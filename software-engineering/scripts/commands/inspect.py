@@ -75,6 +75,7 @@ def handle(args: argparse.Namespace) -> CommandResult:
             target=args.target,
             offline=args.offline,
             dependency_evidence_paths=args.dependency_evidence,
+            exact_root=True,
         )
         root = Path(report["root"])
         data = {
@@ -91,7 +92,11 @@ def handle(args: argparse.Namespace) -> CommandResult:
         raise ValueError(
             "--target, --offline, and --dependency-evidence require an active inspect profile"
         )
-    report = inspect_repository(args.project_root, global_agents=args.global_agents)
+    report = inspect_repository(
+        args.project_root,
+        global_agents=args.global_agents,
+        exact_root=True,
+    )
     root = Path(report["root"])
     data = {key: value for key, value in report.items() if key not in {"schema_version", "root"}}
     return CommandResult("passed", root, data, EXIT_OK, render_inspection(report))

@@ -1,0 +1,7 @@
+extends: existence
+message: "review: the construction \"it's not about X, it's about Y\" is a canned AI-tell framing. This is a review note, not a verdict — weigh whether the contrast is earned."
+level: warning
+ignorecase: true
+scope: sentence
+tokens:
+  - "\\bit's not about[^;]*?it's about\\b"

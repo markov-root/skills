@@ -145,10 +145,10 @@ def git_changes(root: Path, base_ref: str | None = None) -> tuple[Change, ...]:
             timeout_seconds=10,
             max_output_bytes=10_000_000,
         )
-        if untracked.status == "passed":
-            result.extend(
-                Change(path, "??") for path in untracked.stdout.decode().split("\0") if path
-            )
+        if untracked.status != "passed":
+            error = untracked.stderr.decode(errors="replace").strip()
+            raise RuntimeError(error or "git ls-files failed")
+        result.extend(Change(path, "??") for path in untracked.stdout.decode().split("\0") if path)
     return tuple(dict.fromkeys(result))
 
 

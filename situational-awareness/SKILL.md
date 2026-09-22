@@ -15,7 +15,7 @@ description: >-
   SUBSUMES the old `usage-check` skill.
 license: Apache-2.0
 metadata:
-  version: "0.1.1"
+  version: "0.2.2"
 ---
 
 # situational-awareness
@@ -24,7 +24,33 @@ Answers "how much budget do I have, and what should I do about it?" across conte
 subscription quota, and prompt-cache efficiency. The model can't introspect these;
 the commands read the on-disk data the harness already writes.
 
-## Commands (installed on PATH, or `./scripts/<cmd>` in-repo)
+## Invocation
+
+Resolve `<skill-root>` from the directory containing this loaded `SKILL.md`, following
+symlinks to the artifact when needed. It is a placeholder for the actual location supplied
+by the harness, not a fixed install directory or the shell's working directory. If that
+location is unavailable, use the harness's skill location metadata or ask for it rather
+than guessing a home-directory path.
+
+Prefer the named PATH command after checking once per session that it targets this
+artifact: use `command -v`, then inspect the resolved symlink or launcher target and
+runner against `assets/cli.json`. A matching command name or version alone is insufficient.
+If the command is absent, points elsewhere, or cannot be verified, use the bundled
+invocation below. Quote the resolved root so installation paths containing spaces work.
+Keep the caller's working directory. PATH installation and skill-manager are optional;
+these instructions work with an ordinary skills.sh installation too.
+
+Preferred commands: `context-check`, `usage-check`, `cache-check`, and `budget`.
+For each command, the bundled fallback is `"<skill-root>/scripts/<cmd>"` with the
+same arguments; for example:
+
+```sh
+"<skill-root>/scripts/budget" --json
+```
+
+Examples below use the bare command names as shorthand for either verified invocation.
+
+## Commands
 
 ### `context-check` — context window
 
@@ -59,7 +85,12 @@ usage-check --wait             # if wait_for_reset, poll until the window resets
 ```
 
 Thresholds `--warn-5h/--max-5h/--warn-7d/--max-7d` (default 80/90), `--window`,
-`--max-age`, `--fail-on-warn`, `--forecast`, `--refresh`. Claude quota comes from its statusline
+`--max-age`, `--fail-on-warn`, `--forecast`, `--refresh`. As a reset approaches, the effective stop
+threshold ramps from the configured max toward a 99.9% ceiling over the final ~43% of each window
+(72h weekly / ~2.1h five-hour), so an allocation is spent down instead of stopping early while its
+reset is imminent — e.g. 95% weekly with <24h left keeps working rather than `wait_for_reset`.
+Default-on and reported under `relaxation` in `--json`; disable with `--no-reset-relax`, tune with
+`--relax-ceiling`/`--relax-fraction`. Claude quota comes from its statusline
 capture; Codex quota comes from the active transcript and follows live reset epochs. A provider may
 expose only one window; unavailable windows stay `n/a`. OpenCode quota remains unavailable unless
 its upstream exposes a normalized subscription window.

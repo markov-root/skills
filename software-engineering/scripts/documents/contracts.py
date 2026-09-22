@@ -14,9 +14,10 @@ from ..resources import schema_path
 
 DOCUMENT_CONTRACT_VERSION = 1
 DOCUMENT_SCHEMA_VERSION = 2
+DEFAULT_CONTRACT_TIER = "core"
 # Preserve the published v1 graph namespace order while serving as the single
 # source of truth for roles that carry lifecycle/relationship extensions.
-RECORD_ROLES = ("task", "adr", "audit", "research", "lesson", "handoff")
+RECORD_ROLES = ("task", "adr", "audit", "research", "lesson", "handoff", "plan")
 GENERIC_ROLES = (
     "specification",
     "knowledge",
@@ -95,6 +96,11 @@ def project_relationship_details(metadata: Mapping[str, Any]) -> dict[str, list[
     }
 
 
+def record_contract_tier(metadata: Mapping[str, Any]) -> str:
+    """Return the explicit record tier, defaulting historical records to core."""
+    return str(metadata.get("contract_tier", DEFAULT_CONTRACT_TIER))
+
+
 def _edges(*pairs: tuple[str, str]) -> frozenset[tuple[str, str]]:
     return frozenset(pairs)
 
@@ -103,19 +109,27 @@ ROLE_CONTRACTS = {
     "task": DocumentRoleContract(
         "task",
         "work-state",
-        ("todo", "partial", "blocked", "done", "superseded"),
+        ("todo", "in_progress", "partial", "blocked", "done", "superseded"),
         ("todo",),
         ("done", "superseded"),
         _edges(
+            ("todo", "in_progress"),
             ("todo", "partial"),
             ("todo", "blocked"),
             ("todo", "done"),
             ("todo", "superseded"),
+            ("in_progress", "todo"),
+            ("in_progress", "partial"),
+            ("in_progress", "blocked"),
+            ("in_progress", "done"),
+            ("in_progress", "superseded"),
             ("partial", "todo"),
+            ("partial", "in_progress"),
             ("partial", "blocked"),
             ("partial", "done"),
             ("partial", "superseded"),
             ("blocked", "todo"),
+            ("blocked", "in_progress"),
             ("blocked", "partial"),
             ("blocked", "done"),
             ("blocked", "superseded"),
@@ -189,6 +203,21 @@ ROLE_CONTRACTS = {
         _edges(("current", "superseded")),
         ("Outcome", "Completed work", "Open work", "Blockers", "Resume"),
     ),
+    "plan": DocumentRoleContract(
+        "plan",
+        "execution-plan",
+        ("active", "complete", "abandoned", "superseded"),
+        ("active",),
+        ("complete", "abandoned", "superseded"),
+        _edges(
+            ("active", "complete"),
+            ("active", "abandoned"),
+            ("active", "superseded"),
+            ("complete", "superseded"),
+            ("abandoned", "superseded"),
+        ),
+        ("Objective", "Approach", "Progress log", "Current state", "Next steps"),
+    ),
 }
 
 ROLE_CONTRACTS.update(
@@ -197,6 +226,44 @@ ROLE_CONTRACTS.update(
         for role in GENERIC_ROLES
     }
 )
+
+# Task-state predicates (ADR 0025 §6). Orchestration reads these derived booleans instead of
+# hard-coding the raw state enum. Defaults cover the built-in task states; an unmapped state
+# resolves to is_unknown (never invalid). A caller may pass a per-project override mapping.
+PREDICATE_NAMES = (
+    "is_open",
+    "is_started",
+    "is_blocked",
+    "is_terminal_success",
+    "is_terminal_noop",
+    "needs_review",
+)
+STATE_PREDICATES: dict[str, frozenset[str]] = {
+    "todo": frozenset({"is_open"}),
+    "in_progress": frozenset({"is_open", "is_started"}),
+    "partial": frozenset({"is_open", "is_started"}),
+    "blocked": frozenset({"is_open", "is_blocked"}),
+    "done": frozenset({"is_terminal_success"}),
+    "superseded": frozenset({"is_terminal_noop"}),
+}
+
+
+def state_predicates(
+    state: str,
+    overrides: Mapping[str, frozenset[str]] | None = None,
+) -> dict[str, bool]:
+    """Resolve the derived predicate booleans for a task state.
+
+    Defaults cover the built-in states; ``overrides`` (e.g. a per-project mapping) win. An
+    unmapped state resolves to ``is_unknown`` with every predicate False, never an error.
+    """
+    table = dict(STATE_PREDICATES)
+    if overrides:
+        table.update(overrides)
+    active = table.get(state)
+    if active is None:
+        return {"is_unknown": True, **{name: False for name in PREDICATE_NAMES}}
+    return {"is_unknown": False, **{name: name in active for name in PREDICATE_NAMES}}
 
 
 @lru_cache(maxsize=1)
@@ -223,6 +290,7 @@ def core_metadata_validator() -> jsonschema.Draft202012Validator:
 
 def validate_document_records(
     records: Sequence[DocumentContractRecord],
+    extra_known_identities: frozenset[str] = frozenset(),
 ) -> tuple[DocumentContractFinding, ...]:
     """Validate already-extracted metadata without scanning or changing repository files."""
     findings: list[DocumentContractFinding] = []
@@ -283,6 +351,11 @@ def validate_document_records(
             )
 
     known = set(identities)
+    known.update(
+        identity
+        for identity in extra_known_identities
+        if identity.split(":", 1)[0] in GENERIC_ROLES
+    )
     for record in valid_records:
         source_identity = _identity(record.metadata)
         for relationship in record.metadata.get("relationships", ()):
@@ -309,6 +382,7 @@ def _validate_record_semantics(
     findings: list[DocumentContractFinding] = []
     transitions = metadata["transitions"]
     history = metadata["transition_history"]
+    full_contract = record_contract_tier(metadata) == "full"
 
     findings.extend(_validate_dates(record))
 
@@ -321,7 +395,7 @@ def _validate_record_semantics(
                     f"{history} transition history must not contain asserted transitions",
                 )
             )
-        if history == "unverified" and state not in contract.initial_states:
+        if full_contract and history == "unverified" and state not in contract.initial_states:
             findings.append(
                 DocumentContractFinding(
                     record.source,
@@ -330,7 +404,7 @@ def _validate_record_semantics(
                 )
             )
     elif not transitions:
-        if state not in contract.initial_states:
+        if full_contract and state not in contract.initial_states:
             findings.append(
                 DocumentContractFinding(
                     record.source,
@@ -359,7 +433,7 @@ def _validate_record_semantics(
                     )
                 )
             previous = transition["to"]
-        if transitions[0]["from"] not in contract.initial_states:
+        if full_contract and transitions[0]["from"] not in contract.initial_states:
             findings.append(
                 DocumentContractFinding(
                     record.source,

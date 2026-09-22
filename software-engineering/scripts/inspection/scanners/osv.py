@@ -171,7 +171,11 @@ def _dependency_evidence(
 
 
 def _unavailable(
-    started: float, tool: ToolEvidence, reason: str, *, limitations: tuple[str, ...] = ()
+    started: float,
+    tool: ToolEvidence,
+    reason: str,
+    *,
+    limitations: tuple[str, ...] = (),
 ) -> InspectionLayer:
     return InspectionLayer(
         "dependency-vulnerabilities",
@@ -233,31 +237,46 @@ def run_osv(root: Path, *, offline: bool) -> InspectionLayer:
             return _unavailable(started, tool, "OSV-Scanner could not start")
         if result.exit_code not in {0, 1}:
             stderr = result.stderr.decode("utf-8", errors="replace").lower()
-            network_failure = any(
-                marker in stderr
-                for marker in (
-                    "temporary failure in name resolution",
-                    "network is unreachable",
-                    "operation not permitted",
-                    "no such host",
-                    "lookup api.osv.dev",
+            if "no package sources found" in stderr:
+                # OSV-Scanner exits non-zero when the tree contains no scannable
+                # dependency manifests. That is "nothing to scan", not a tool or
+                # network failure, so classify it as a zero-package result rather
+                # than reporting the dependency layer unavailable.
+                findings, package_count, truncated, error, advisories, artifacts = (
+                    (),
+                    0,
+                    False,
+                    None,
+                    (),
+                    (),
                 )
-            )
-            reason = (
-                "OSV-Scanner offline vulnerability data is unavailable or unusable; "
-                "refresh the offline database before retrying"
-                if offline
-                else (
-                    "OSV-Scanner could not reach its vulnerability service; retry with network "
-                    "access or use --offline after downloading the offline vulnerability database"
-                    if network_failure
-                    else f"OSV-Scanner exited {result.exit_code}"
+            else:
+                network_failure = any(
+                    marker in stderr
+                    for marker in (
+                        "temporary failure in name resolution",
+                        "network is unreachable",
+                        "operation not permitted",
+                        "no such host",
+                        "lookup api.osv.dev",
+                    )
                 )
+                reason = (
+                    "OSV-Scanner offline vulnerability data is unavailable or unusable; "
+                    "refresh the offline database before retrying"
+                    if offline
+                    else (
+                        "OSV-Scanner could not reach its vulnerability service; retry with network "
+                        "access or use --offline after downloading the offline vulnerability database"
+                        if network_failure
+                        else f"OSV-Scanner exited {result.exit_code}"
+                    )
+                )
+                return _unavailable(started, tool, reason)
+        else:
+            findings, package_count, truncated, error, advisories, artifacts = parse_osv_details(
+                root, report
             )
-            return _unavailable(started, tool, reason)
-        findings, package_count, truncated, error, advisories, artifacts = parse_osv_details(
-            root, report
-        )
     if error:
         return _unavailable(started, tool, error)
     status = (

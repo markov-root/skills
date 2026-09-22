@@ -51,7 +51,7 @@ PRIVATE_IPV4_RE = re.compile(
     r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?!\d)"
 )
 INTERNAL_HOST_RE = re.compile(
-    r"(?<![A-Za-z0-9.-])(?:[A-Za-z0-9-]+\.)+(?:home\.lab|internal|lan|local)(?![A-Za-z0-9.-])",
+    r"(?<![A-Za-z0-9._-])(?:[A-Za-z0-9-]+\.)+(?:home\.lab|internal|lan|local)(?![A-Za-z0-9._-])",
     re.IGNORECASE,
 )
 HOME_PATH_RE = re.compile(

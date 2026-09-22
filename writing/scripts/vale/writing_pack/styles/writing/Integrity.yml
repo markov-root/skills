@@ -1,0 +1,7 @@
+extends: existence
+message: "review (blocking): unresolved source marker '%s'. Resolve or narrow this claim before delivery; this blocks final mode."
+level: error
+ignorecase: false
+scope: raw
+tokens:
+  - 'SOURCE NEEDED'

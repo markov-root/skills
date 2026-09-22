@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from heapq import heappop, heappush
 from typing import Any
 
 from ..policy.manifest import Check, FitnessDeclaration, Profile
-from .contracts import RECORD_ROLES, DocumentContractRecord
+from .contracts import RECORD_ROLES, DocumentContractRecord, state_predicates
 from .currency import CurrencyFinding
 from .validation import DocumentScan
 
@@ -92,6 +93,308 @@ class GraphCheck:
     applies_to: tuple[str, ...]
     profiles: tuple[str, ...]
     fitness: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TaskGraphNode:
+    id: str
+    title: str
+    state: str
+    depends_on: tuple[str, ...]
+    parent: str | None
+    children: tuple[str, ...]
+    open_clarification: bool
+    ready: bool
+    wave: int | None
+    provenance: dict[str, Any]
+
+
+@dataclass(frozen=True, order=True)
+class TaskGraphOrphan:
+    task: str
+    relationship: str
+    target: str
+    provenance: str
+
+
+@dataclass(frozen=True, order=True)
+class TaskGraphCycle:
+    relationship: str
+    tasks: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TaskGraph:
+    nodes: tuple[TaskGraphNode, ...]
+    edges: tuple[dict[str, Any], ...]
+    topological_order: tuple[str, ...]
+    ready_set: tuple[str, ...]
+    waves: tuple[tuple[str, ...], ...]
+    cycles: tuple[TaskGraphCycle, ...]
+    orphans: tuple[TaskGraphOrphan, ...]
+    unresolved_order: tuple[str, ...]
+    partial: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "nodes": [asdict(item) for item in self.nodes],
+            "edges": list(self.edges),
+            "topological_order": list(self.topological_order),
+            "ready_set": list(self.ready_set),
+            "waves": [
+                {"level": level, "tasks": list(tasks)} for level, tasks in enumerate(self.waves)
+            ],
+            "cycles": [asdict(item) for item in self.cycles],
+            "orphans": [asdict(item) for item in self.orphans],
+            "unresolved_order": list(self.unresolved_order),
+            "partial": self.partial,
+        }
+
+
+def build_task_graph(tasks: Sequence[Mapping[str, Any]]) -> TaskGraph:
+    """Project task scheduling and hierarchy relationships without mutating source files."""
+    tasks_by_id: dict[str, Mapping[str, Any]] = {}
+    for task in tasks:
+        tasks_by_id.setdefault(str(task["id"]), task)
+
+    dependency_adjacency: dict[str, set[str]] = {task_id: set() for task_id in tasks_by_id}
+    parent_adjacency: dict[str, set[str]] = {task_id: set() for task_id in tasks_by_id}
+    outgoing: dict[str, set[str]] = {task_id: set() for task_id in tasks_by_id}
+    indegree = {task_id: 0 for task_id in tasks_by_id}
+    children: dict[str, set[str]] = {task_id: set() for task_id in tasks_by_id}
+    edges: list[dict[str, Any]] = []
+    orphans: list[TaskGraphOrphan] = []
+
+    for task_id, task in tasks_by_id.items():
+        provenance = _task_provenance_path(task)
+        for dependency in _task_dependencies(task):
+            resolved = dependency in tasks_by_id
+            edges.append(
+                {
+                    "source": dependency,
+                    "target": task_id,
+                    "relationship": "depends_on",
+                    "resolved": resolved,
+                }
+            )
+            if not resolved:
+                orphans.append(TaskGraphOrphan(task_id, "depends_on", dependency, provenance))
+                continue
+            dependency_adjacency[task_id].add(dependency)
+            if task_id not in outgoing[dependency]:
+                outgoing[dependency].add(task_id)
+                indegree[task_id] += 1
+        parent_value = task.get("parent")
+        parent = str(parent_value) if parent_value not in {None, ""} else None
+        if parent is None:
+            continue
+        resolved = parent in tasks_by_id
+        edges.append(
+            {
+                "source": parent,
+                "target": task_id,
+                "relationship": "parent",
+                "resolved": resolved,
+            }
+        )
+        if not resolved:
+            orphans.append(TaskGraphOrphan(task_id, "parent", parent, provenance))
+            continue
+        parent_adjacency[task_id].add(parent)
+        children[parent].add(task_id)
+
+    queue: list[str] = []
+    levels = {task_id: 0 for task_id, degree in indegree.items() if degree == 0}
+    for task_id, degree in indegree.items():
+        if degree == 0:
+            heappush(queue, task_id)
+    order: list[str] = []
+    while queue:
+        current = heappop(queue)
+        order.append(current)
+        for dependent in sorted(outgoing[current]):
+            levels[dependent] = max(levels.get(dependent, 0), levels[current] + 1)
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                heappush(queue, dependent)
+
+    unresolved_order = tuple(sorted(set(tasks_by_id) - set(order)))
+    dependency_cycles = tuple(
+        TaskGraphCycle("depends_on", cycle) for cycle in _task_cycles(dependency_adjacency)
+    )
+    parent_cycles = tuple(
+        TaskGraphCycle("parent", cycle) for cycle in _task_cycles(parent_adjacency)
+    )
+    cycles = tuple(sorted((*dependency_cycles, *parent_cycles)))
+    ready: list[str] = []
+    nodes: list[TaskGraphNode] = []
+    for task_id, task in sorted(tasks_by_id.items()):
+        predicates = state_predicates(str(task.get("status", "unknown")))
+        dependencies = _task_dependencies(task)
+        dependencies_succeeded = all(
+            dependency in tasks_by_id
+            and state_predicates(str(tasks_by_id[dependency].get("status", "unknown")))[
+                "is_terminal_success"
+            ]
+            for dependency in dependencies
+        )
+        is_ready = (
+            predicates["is_open"]
+            and dependencies_succeeded
+            and not bool(task.get("open_clarification", False))
+        )
+        if is_ready:
+            ready.append(task_id)
+        parent_value = task.get("parent")
+        nodes.append(
+            TaskGraphNode(
+                id=task_id,
+                title=str(task.get("title", task_id)),
+                state=str(task.get("status", "unknown")),
+                depends_on=dependencies,
+                parent=str(parent_value) if parent_value not in {None, ""} else None,
+                children=tuple(sorted(children[task_id])),
+                open_clarification=bool(task.get("open_clarification", False)),
+                ready=is_ready,
+                wave=levels.get(task_id),
+                provenance=dict(task.get("provenance", {})),
+            )
+        )
+
+    waves = tuple(
+        tuple(sorted(task_id for task_id, level in levels.items() if level == wave))
+        for wave in range(max(levels.values(), default=-1) + 1)
+    )
+    normalized_orphans = tuple(sorted(set(orphans)))
+    return TaskGraph(
+        nodes=tuple(nodes),
+        edges=tuple(
+            sorted(
+                edges,
+                key=lambda item: (
+                    item["relationship"],
+                    item["source"],
+                    item["target"],
+                ),
+            )
+        ),
+        topological_order=tuple(order),
+        ready_set=tuple(ready),
+        waves=waves,
+        cycles=cycles,
+        orphans=normalized_orphans,
+        unresolved_order=unresolved_order,
+        partial=bool(cycles or normalized_orphans or unresolved_order),
+    )
+
+
+def render_task_graph_readme(graph: TaskGraph) -> str:
+    """Render the read-only graph projection as a regenerable tasks/README.md view."""
+    nodes = {item.id: item for item in graph.nodes}
+    lines = [
+        "# Task DAG",
+        "",
+        "<!-- Generated by `engineering task graph`; do not edit this projection by hand. -->",
+        "",
+        "## Ready set",
+        "",
+    ]
+    lines.extend(_task_lines(graph.ready_set, nodes))
+    lines.extend(("", "## Topological order", ""))
+    if graph.topological_order:
+        lines.extend(
+            f"{index}. `{task_id}` — {nodes[task_id].title} ({nodes[task_id].state})"
+            for index, task_id in enumerate(graph.topological_order, start=1)
+        )
+    else:
+        lines.append("- None")
+    lines.extend(("", "## Waves", ""))
+    if graph.waves:
+        for level, tasks in enumerate(graph.waves):
+            lines.extend((f"### Wave {level}", "", *_task_lines(tasks, nodes), ""))
+    else:
+        lines.extend(("- None", ""))
+    lines.extend(("## Parent hierarchy", ""))
+    parents = [item for item in graph.nodes if item.children]
+    if parents:
+        for item in parents:
+            lines.append(f"- `{item.id}` → {', '.join(f'`{child}`' for child in item.children)}")
+    else:
+        lines.append("- None")
+    lines.extend(("", "## Cycles", ""))
+    if graph.cycles:
+        for cycle in graph.cycles:
+            path = " → ".join((*cycle.tasks, cycle.tasks[0]))
+            lines.append(f"- `{cycle.relationship}`: {path}")
+    else:
+        lines.append("- None")
+    lines.extend(("", "## Orphans", ""))
+    if graph.orphans:
+        for orphan in graph.orphans:
+            lines.append(
+                f"- `{orphan.task}` {orphan.relationship} target `{orphan.target}` is missing "
+                f"(`{orphan.provenance}`)"
+            )
+    else:
+        lines.append("- None")
+    if graph.unresolved_order:
+        lines.extend(
+            (
+                "",
+                "## Unresolved topological order",
+                "",
+                *[f"- `{task_id}`" for task_id in graph.unresolved_order],
+            )
+        )
+    return "\n".join(lines)
+
+
+def _task_lines(task_ids: Sequence[str], nodes: Mapping[str, TaskGraphNode]) -> list[str]:
+    return [
+        f"- `{task_id}` — {nodes[task_id].title} ({nodes[task_id].state})" for task_id in task_ids
+    ] or ["- None"]
+
+
+def _task_provenance_path(task: Mapping[str, Any]) -> str:
+    provenance = task.get("provenance")
+    return str(provenance.get("path", ".")) if isinstance(provenance, Mapping) else "."
+
+
+def _task_dependencies(task: Mapping[str, Any]) -> tuple[str, ...]:
+    declared = task.get("scheduling_dependencies", task.get("dependencies", ()))
+    return tuple(dict.fromkeys(str(item) for item in declared))
+
+
+def _task_cycles(adjacency: Mapping[str, set[str]]) -> tuple[tuple[str, ...], ...]:
+    cycles: set[tuple[str, ...]] = set()
+    color: dict[str, int] = {}
+    parent: dict[str, str] = {}
+    for origin in sorted(adjacency):
+        if color.get(origin, 0):
+            continue
+        color[origin] = 1
+        stack: list[tuple[str, Any]] = [(origin, iter(sorted(adjacency.get(origin, ()))))]
+        while stack:
+            current, neighbors = stack[-1]
+            try:
+                target = next(neighbors)
+            except StopIteration:
+                color[current] = 2
+                stack.pop()
+                continue
+            if color.get(target, 0) == 0:
+                parent[target] = current
+                color[target] = 1
+                stack.append((target, iter(sorted(adjacency.get(target, ())))))
+            elif color[target] == 1:
+                reverse = [current]
+                while reverse[-1] != target:
+                    reverse.append(parent[reverse[-1]])
+                cycle = tuple(reversed(reverse))
+                first = min(range(len(cycle)), key=cycle.__getitem__)
+                cycles.add(cycle[first:] + cycle[:first])
+    return tuple(sorted(cycles))
 
 
 def graph_checks(

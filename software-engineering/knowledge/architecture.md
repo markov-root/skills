@@ -625,7 +625,12 @@ When reviewing an existing system, ask these in order:
 7. **What does production failure look like, and how is it observed?**
 8. **What is the threat model?** (See [SECURITY](security.md).)
 9. **What data is collected, why, and how long is it kept?** (See [PRIVACY](privacy.md).)
-10. **What did the team explicitly decide _not_ to do, and why?** (The ADRs answer this. If there are none, the team did not _decide_ — they drifted.)
+10. **What did the team explicitly decide _not_ to do, and why?** (A recorded decision answers this;
+    the record may be an ADR or the project's equivalent. If no record of a consequential decision
+    exists anywhere the team can find — decisions also live in tasks, reviews, and code — the
+    rationale is missing and worth closing. But decisions that never warranted a record are not a
+    gap, and an existing ADR is authority only while accepted and unsuperseded; route new decisions
+    through the worthiness table in [documentation structure](documentation-structure.md).)
 
 ---
 

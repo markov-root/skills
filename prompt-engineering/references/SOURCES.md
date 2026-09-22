@@ -54,6 +54,44 @@ The artifact publishes synthesis and citations, not mirrored copies of provider 
 - ✓ **OpenAI Cookbook — GPT-4.1 Prompting Guide**, MacCallum & Lee, Apr 14 2025. <https://cookbook.openai.com/examples/gpt4-1_prompting_guide>
 - ✓ **OpenAI Cookbook — GPT-5 prompting guide**, Aug 7 2025. <https://developers.openai.com/cookbook/examples/gpt-5/gpt-5_prompting_guide>
 
+### Provider-version matrix references (backing `knowledge/provider-matrix.md`, reviewed 2026-08-14)
+
+Anthropic rows verified against first-party docs and the `claude-api` skill on the review date;
+OpenAI/Google rows (`◐`) are from live provider docs via web research and still need a first-party
+spot-check.
+
+- ✓ **Anthropic — Models overview.** Reviewed 2026-08-14. <https://platform.claude.com/docs/en/about-claude/models/overview>
+- ✓ **Anthropic — Effort.** Reviewed 2026-08-14. <https://platform.claude.com/docs/en/build-with-claude/effort>
+- ✓ **Anthropic — Extended thinking.** Reviewed 2026-08-14. <https://platform.claude.com/docs/en/build-with-claude/extended-thinking>
+- ✓ **Anthropic — Using the Messages API.** Reviewed 2026-08-14. <https://platform.claude.com/docs/en/build-with-claude/working-with-messages>
+- ✓ **Anthropic — Structured outputs.** Reviewed 2026-08-14. <https://platform.claude.com/docs/en/build-with-claude/structured-outputs>
+- ✓ **Anthropic — Prompt caching.** Reviewed 2026-08-14. <https://platform.claude.com/docs/en/build-with-claude/prompt-caching>
+- ✓ **Anthropic — Model deprecations.** Reviewed 2026-08-14. <https://platform.claude.com/docs/en/about-claude/model-deprecations>
+- ◐ **OpenAI — Models.** Reviewed 2026-08-14. <https://developers.openai.com/api/docs/models>
+- ◐ **OpenAI — Model guidance.** Reviewed 2026-08-14. <https://developers.openai.com/api/docs/guides/latest-model>
+- ◐ **OpenAI — Reasoning models.** Reviewed 2026-08-14. <https://developers.openai.com/api/docs/guides/reasoning>
+- ◐ **OpenAI — Structured model outputs.** Reviewed 2026-08-14. <https://platform.openai.com/docs/guides/structured-outputs>
+- ◐ **Google — Models.** Reviewed 2026-08-14. <https://ai.google.dev/gemini-api/docs/models>
+- ◐ **Google — What's new in Gemini 3.7 Flash.** Reviewed 2026-08-14. <https://ai.google.dev/gemini-api/docs/latest-model>
+- ◐ **Google — Gemini thinking.** Reviewed 2026-08-14. <https://ai.google.dev/gemini-api/docs/thinking>
+- ◐ **Google — Structured outputs.** Reviewed 2026-08-14. <https://ai.google.dev/gemini-api/docs/structured-output>
+
+### Named methods & standards (claim provenance)
+
+Every named method, standard, or acronym used in a knowledge module traces here; the
+`check-publication` provenance gate fails the build if a cited token has no entry below.
+
+- ✓ **CFPO — Content-Format Integrated Prompt Optimization** ("Beyond Prompt Content…"), Liu et al., 2025. Backs the format-sensitivity claim in `structure.md`. <https://arxiv.org/abs/2502.04295>
+- ✓ **HyDE — Precise Zero-Shot Dense Retrieval without Relevance Labels**, Gao et al., 2022. Backs the
+  hypothetical-document-embedding note in `rag-retrieval.md`. <https://arxiv.org/abs/2212.10496>
+- ✓ **Query2doc: Query Expansion with Large Language Models**, Wang et al., 2023. Backs the
+  query-expansion note in `rag-retrieval.md`. <https://arxiv.org/abs/2303.07678>
+- ✓ **MQM — Multidimensional Quality Metrics framework**, MQM Council. Backs the MQM-derived review
+  contract in `translation-localization.md`. <https://themqm.org/>
+- ✓ **ICU MessageFormat** (Formatting Messages), Unicode ICU documentation. Backs the ICU/message
+  syntax validation step in `translation-localization.md`.
+  <https://unicode-org.github.io/icu/userguide/format_parse/messages/>
+
 ## Surveys, taxonomies & "what is a good prompt"
 
 - ✓ **The Prompt Report: A Systematic Survey of Prompting Techniques**, Schulhoff et al., Jun 2024 — _foundational-but-older_, still the canonical technique taxonomy. <https://arxiv.org/abs/2406.06608>
@@ -86,6 +124,11 @@ The artifact publishes synthesis and citations, not mirrored copies of provider 
 - ✓ **Don't Build Multi-Agents**, Walden Yan / Cognition, Jun 2025. <https://cognition.com/blog/dont-build-multi-agents>
 - ✓ **Multi-Agents: What's Actually Working**, Cognition, Apr 2026. <https://cognition.com/blog/multi-agents-working>
 - ✓ **Context Engineering for AI Agents: Lessons from Building Manus**, "Peak" Ji / Manus, Jul 2025. <https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus>
+- ✓ **LLM Prompt Injection Prevention Cheat Sheet**, OWASP Cheat Sheet Series / OWASP, reviewed
+  2026-08-14. <https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html>
+- ✓ **Mitigating prompt injection attacks with a layered defense strategy**, Google GenAI Security
+  Team / Google Security Blog, Jun 13 2025, reviewed 2026-08-14.
+  <https://blog.google/security/mitigating-prompt-injection-attacks/>
 
 ## Empirical evidence — what works vs myths (all verified)
 

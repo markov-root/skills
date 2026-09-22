@@ -16,7 +16,7 @@ description: >-
 license: Apache-2.0
 metadata:
   author: markov-root
-  version: "0.7.6"
+  version: "0.11.3"
 ---
 
 # software-engineering
@@ -33,13 +33,44 @@ causal review beyond the diff, and binds completion claims to evidence. Use it w
 is non-trivial because those controls otherwise have to be reconstructed from memory on every run.
 It does not replace implementation judgment, project policy, specialist tools, or human approval.
 
-Resolve paths below relative to this `SKILL.md`. Before invoking the bundled CLI, run
-`command -v uv`. If uv is unavailable, report that prerequisite as unavailable and stop; the skill
-does not bootstrap an operator runtime. The portable invocation is
-`uv run --script <skill-root>/scripts/engineering.py ...`. The word `engineering` below abbreviates
-that invocation only—the skill does not provide or promise a PATH executable. A cold online run may
-download the locked dependencies. A cold offline run cannot do so and must be reported as an
-offline/cache prerequisite failure; a warm locked cache supports offline execution.
+## Invocation
+
+Resolve `<skill-root>` from the directory containing this loaded `SKILL.md`, following
+symlinks to the artifact when needed. It is a placeholder for the actual location supplied
+by the harness, not a fixed install directory or the shell's working directory. If that
+location is unavailable, use the harness's skill location metadata or ask for it rather
+than guessing a home-directory path.
+
+Prefer the named PATH command after checking once per session that it targets this
+artifact: use `command -v`, then inspect the resolved symlink or launcher target and
+runner against `assets/cli.json`. A matching command name or version alone is insufficient.
+If the command is absent, points elsewhere, or cannot be verified, use the bundled
+invocation below. Quote the resolved root so installation paths containing spaces work.
+Keep the caller's working directory. PATH installation and skill-manager are optional;
+these instructions work with an ordinary skills.sh installation too.
+
+Preferred command: `engineering`. Bundled fallback:
+
+```sh
+uv run --script "<skill-root>/scripts/engineering.py" inspect
+```
+
+Examples below use `engineering` as shorthand for the verified PATH command or that
+bundled invocation with the same arguments. The CLI release identity comes from this file's
+`metadata.version`.
+
+### Bootstrap prerequisites and failure modes
+
+- Check `command -v uv`; if uv is unavailable, ask the operator to install it through its
+  documented installer. This skill does not provision tooling or grant installation authority.
+- A warm offline run succeeds only with a compatible available interpreter, the required cached
+  packages, and a writable cache. Missing or incompatible Python and cold offline dependencies
+  are bootstrap prerequisites, not application findings. A cold online run may download Python
+  or packages when environment policy permits; the adjacent script lock guides dependency
+  resolution but the ordinary invocation may update it when necessary.
+- Preserve uv's configured cache policy, including an explicit `UV_CACHE_DIR`. Read-only cache
+  access can fail before Python entry. Report the exact diagnostic and request the appropriate
+  operator action; this skill ships no temporary-cache fallback of its own.
 
 ## Workflow
 
@@ -100,6 +131,13 @@ When the task needs domain guidance:
 3. Select the smallest route-matching set, then open only those full knowledge files.
 4. If the route is unknown or ambiguous, inspect the task and project policy; do not guess a file.
 5. Re-evaluate the selection when accumulated requests expand the task.
+6. Apply selected guidance at the decision point: prefer declared specialist capabilities for
+   their covered work and produce proportionate application evidence, not invocation counts.
+   For library/API questions, use the available project-preferred documentation source first;
+   check version coverage and state an evidenced fallback for gaps. Report material coverage
+   and exceptions honestly: unassessed work is not unavailable capability. Mechanical work needs
+   no practice report. The [selection-to-application procedure](knowledge/principles.md#selecting-and-applying-practices-at-the-decision-point)
+   provides scoped examples without adding a universal checklist.
 
 Directly read [`principles`](knowledge/principles.md) when making a broad design/decomposition
 decision, [`testing`](knowledge/testing.md) before claiming verification evidence, and
@@ -119,7 +157,7 @@ acceptance is unclear. When authoring or reconciling guidance, also read the
 
 ## Tool contract
 
-Run `uv run --script <skill-root>/scripts/engineering.py --help` to discover available deterministic
+Run `engineering --help` to discover available deterministic
 policy, check, classification, fitness, documentation, generated-artifact, and diagnostic commands.
 Vercel `skills` distributes the complete skill folder; it does not install Python dependencies or
 register a shell command. Treat an unavailable prerequisite, check, inspection layer, or reviewer as
@@ -154,8 +192,8 @@ have been explicitly reviewed and added to the manifest.
 
 When authoring, migrating, or reconciling any adopted governed document, run
 `engineering document roles` before editing and `engineering document validate` before completion.
-The closed vocabulary includes six record roles (task, ADR, audit, research, lesson, handoff) and
-ten living/meta roles (specification, knowledge, reference, standard, guide, roadmap, changelog,
+The closed vocabulary includes seven record roles (task, ADR, audit, research, lesson, handoff, plan)
+and ten living/meta roles (specification, knowledge, reference, standard, guide, roadmap, changelog,
 runbook, index, template). Create a document through
 `engineering document new ROLE --title TITLE` so its path number, ID, UID, and dates—and, for record
 roles, safe transition-history state—are allocated mechanically; do not copy a template and
@@ -163,6 +201,9 @@ hand-mint them. The allocator leaves ownership, scope, criteria, evidence, appro
 registration for review. Use the bundled role templates instead of reconstructing the remaining
 authority, lifecycle, currentness, evidence, and supersession fields. The validator is read-only;
 it checks recorded structure and consistency, not prose truth, approval, or evidence quality.
+Validation reports its current-worktree changed paths and effective date. When Git discovery is
+unavailable (including a non-Git directory), it retains findings under the reported legacy
+fallback but returns unavailable with exit 3; that is not a clean validation pass.
 For an existing Markdown document, use
 `engineering document backfill PATH [--role ROLE --title TITLE --summary SUMMARY]`. It atomically
 adds or derives only the v2 core, preserves the Markdown body bytes and any

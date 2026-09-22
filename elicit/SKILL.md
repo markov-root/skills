@@ -17,7 +17,7 @@ license: Apache-2.0
 compatibility: No runtime dependencies; instruction-only skill (uses the harness's own question/plan primitives).
 metadata:
   author: markov-root
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # Elicit
@@ -122,6 +122,19 @@ proceed," or the cap is hit — whichever comes first. Then act on the best curr
 understanding and record residual assumptions. In speed mode, satisfice: set a
 "good enough" bar and act. A comprehension pass that wouldn't change what you
 build is already complete.
+
+## Improving this skill (read before recording feedback)
+
+Unlike a test- or benchmark-anchored skill, `elicit` **cannot grade itself**: its
+quality is whether the questions surfaced what the user actually wanted, and that
+ground truth lives with the user, not the agent. Agent self-judgment here drifts
+toward asking more and is **low-trust** — improve only on user-anchored evidence
+(rework/acceptance, observed impatience or engagement, explicit user feedback,
+independent evaluation), plus the per-episode calibration log (question-answer
+divergence and later-falsified assumptions). Record feedback via `skill-feedback`
+with an honest `--source`; never dress agent judgment as user satisfaction. Read
+[`knowledge/evaluation.md`](knowledge/evaluation.md) before tuning the rubric,
+cap, or triggers.
 
 ## Provenance
 

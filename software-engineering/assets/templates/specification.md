@@ -15,6 +15,14 @@ superseded_by: ""
 
 # Specification: TITLE
 
+<!-- Quality bar — write to the Specification content standard
+the software-engineering skill knowledge file knowledge/documentation-living-content-standards.md (section #specification):
+requirements traced to authorized need · normal and boundary cases · coherent rules across the
+system · evolution and divergence owners · examples linked to rules. Discriminating test: can
+independent reviewers classify the same representative/boundary cases alike and trace every material
+rule to authorized need without private intent? Delete this comment once the specification is
+written. -->
+
 ## Purpose
 
 What this specification describes and who it serves. Replace the title placeholder.

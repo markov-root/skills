@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import uuid
 from collections.abc import Mapping
@@ -13,7 +14,9 @@ from typing import Any
 
 import yaml
 
+from ..policy.document_paths import DocumentContainment
 from ..policy.manifest import DocsCurrencyPolicy
+from ..policy.path_matching import matches_any
 from .authoring import _HEX8, _ROLE_LABELS, _slug
 from .contracts import ROLE_CONTRACTS
 from .validation import _UniqueKeySafeLoader
@@ -41,10 +44,11 @@ def backfill_document(
     now: datetime | None = None,
     random_hex: str | None = None,
     policy: DocsCurrencyPolicy | None = None,
+    docs_root: Path | None = None,
 ) -> DocumentBackfill:
     """Add or derive the v2 core while preserving the Markdown body bytes exactly."""
     root = root.resolve()
-    target = _contained_file(root, source)
+    target = _contained_file(root, source, docs_root=docs_root)
     original = target.read_bytes()
     metadata, body = _split_document(original)
     extension = metadata.get("engineering_document")
@@ -71,10 +75,12 @@ def backfill_document(
             )
     if resolved_role not in _ROLE_LABELS:
         raise ValueError(f"unknown document role {resolved_role!r}")
+    declaration = None
     if policy is not None:
         adopted = [item for item in policy.roles if item.name == resolved_role and item.contract]
         if len(adopted) != 1:
             raise ValueError(f"document role {resolved_role!r} is not adopted exactly once")
+        declaration = adopted[0]
     resolved_title = _single_line("title", resolved_title)
     resolved_summary = _single_line("summary", resolved_summary)
     if len(resolved_summary) > 150:
@@ -99,8 +105,17 @@ def backfill_document(
         )
         or default_status
     )
+    _reject_contradictory_inline_status(body, str(resolved_status))
     resolved_created = _date_text(metadata.get("created") or nested.get("created") or day)
-    identifier = str(metadata.get("id") or nested.get("id") or _slug(resolved_title))
+    existing_id = metadata.get("id") or nested.get("id")
+    identifier = str(
+        existing_id
+        or (
+            _configured_numeric_id(root, target, declaration)
+            if declaration is not None
+            else _slug(resolved_title)
+        )
+    )
     uid = str(
         metadata.get("uid")
         or nested.get("uid")
@@ -140,7 +155,21 @@ def backfill_document(
     )
 
 
-def _contained_file(root: Path, source: str | Path) -> Path:
+def _contained_file(
+    root: Path,
+    source: str | Path,
+    *,
+    docs_root: Path | None = None,
+) -> Path:
+    if docs_root is not None:
+        containment = DocumentContainment.for_project_docs(root, docs_root)
+        candidate = containment.require_project_path(
+            source,
+            purpose="document backfill source",
+        )
+        if not candidate.is_file():
+            raise ValueError(f"document backfill source is not a file: {source}")
+        return candidate
     candidate = (
         (root / source).resolve() if not Path(source).is_absolute() else Path(source).resolve()
     )
@@ -201,6 +230,37 @@ def _date_text(value: Any) -> str:
     except ValueError as exc:
         raise ValueError(f"document created date is invalid: {text!r}") from exc
     return text
+
+
+def _configured_numeric_id(root: Path, target: Path, declaration: Any) -> str:
+    relative = target.relative_to(root).as_posix()
+    if not matches_any(relative, declaration.include):
+        raise ValueError(f"document path {relative!r} is not selected by role {declaration.name!r}")
+    digits = declaration.id_prefix_digits
+    stem = target.stem
+    prefix = stem[:digits]
+    if (
+        len(prefix) != digits
+        or not prefix.isdigit()
+        or (len(stem) > digits and stem[digits].isdigit())
+    ):
+        raise ValueError(
+            f"document filename must start with a {digits}-digit {declaration.name!r} ID"
+        )
+    return prefix
+
+
+def _reject_contradictory_inline_status(body: bytes, resolved_status: str) -> None:
+    pattern = re.compile(rb"^\s*[-*]\s+Status\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+    expected = resolved_status.strip().casefold()
+    for match in pattern.finditer(body):
+        observed = match.group(1).decode("utf-8", errors="replace").strip()
+        if observed.casefold() != expected:
+            line = body.count(b"\n", 0, match.start()) + 1
+            raise ValueError(
+                f"legacy inline Status at body line {line} conflicts with frontmatter status "
+                f"{resolved_status!r}; remove or reconcile the inline metadata"
+            )
 
 
 def _render(metadata: Mapping[str, Any], body: bytes) -> bytes:

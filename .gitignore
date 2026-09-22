@@ -1,0 +1,47 @@
+# Public mirror of markov's skills monorepo.
+#
+# Only published skill artifacts belong here. Each top-level directory is the
+# promoted content of one skill's artifact folder, written by the private
+# monorepo's scripts/publish.sh — nothing is authored in this repo directly.
+#
+# The private engineering record (ADRs, tasks, audits, research, lessons,
+# feedback, handoffs) and every dev/ factory tree stay in the private monorepo.
+# publish.sh already excludes them by construction; these patterns are the
+# second line of defence, so a hand-copied directory cannot be committed by
+# accident.
+#
+# Patterns are ANCHORED (leading /) on purpose. An unanchored `tests/` would
+# also ignore legitimately shipped artifact code such as
+# writing/scripts/vale/tests/ and debate/scripts/lib/debate/tasks/.
+
+# Private engineering record at the repository root
+/.private/
+/scratch/
+/tests/
+/tasks/
+/adr/
+/audits/
+/research/
+/lessons/
+/feedback/
+/handoffs/
+/docs/tasks/
+/docs/adr/
+/docs/audits/
+/docs/research/
+/docs/lessons/
+/docs/feedback/
+/docs/handoffs/
+
+# Development factory trees never ship
+**/dev/
+
+# Build and tooling cruft
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+node_modules/
+.DS_Store

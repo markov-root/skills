@@ -2,8 +2,9 @@
 
 **This is the file that goes stale fastest — treat it as versioned, re-checkable knobs, not timeless
 law.** The 2025-2026 shift to reasoning models inverted several habits. Sources: provider docs
-(Anthropic, OpenAI GPT-5, Gemini thinking) plus the empirical work cataloged in
-[`../references/SOURCES.md`](../references/SOURCES.md).
+(Anthropic, OpenAI, Gemini thinking) plus the empirical work cataloged in
+[`../references/SOURCES.md`](../references/SOURCES.md). Dated per-model knobs live in
+[`provider-matrix.md`](provider-matrix.md).
 
 ## The big inversions
 
@@ -28,16 +29,20 @@ law.** The 2025-2026 shift to reasoning models inverted several habits. Sources:
 
 Match the reasoning budget to task difficulty — high effort is not free and can _overthink_.
 
-- **Anthropic (Opus 4.x)** — `effort: low | medium | high | xhigh | max` via `output_config`, with
+- **Anthropic (Opus 4.8 + Claude 5 family: Fable 5 / Sonnet 5)** — `output_config.effort`:
+  `low | medium | high | xhigh | max` (default `high`; **Haiku 4.5 does not support `effort`**), with
   `thinking: {type: "adaptive"}` (model decides when/how much to think). Rough guide: `xhigh` for
   coding/agentic, `high` for intelligence-sensitive, `medium` cost-sensitive, `low` for short scoped
-  latency-bound work. `max` hits diminishing returns / overthinks. At high effort, raise
-  `max_output_tokens` (start ~64k) to leave room to think + call tools. `budget_tokens` extended
-  thinking is **deprecated** on 4.6+.
-- **OpenAI (GPT-5)** — reasoning-effort + verbosity controls; lower effort for classification/
-  extraction/retrieval, higher for hard coding/debugging + a verification step.
-- **Google (Gemini 2.5)** — controllable **thinking budget** + thought summaries; spend tokens only
-  when the task needs them.
+  latency-bound work. `max` hits diminishing returns / overthinks. Give the response room:
+  current Opus 4.8 and Claude 5-family synchronous max output is 128k — start `max_output_tokens`
+  ~64k and raise it for demanding agentic/coding work so thinking + tool calls + final text fit.
+  Manual `budget_tokens` extended thinking is **deprecated on 4.6 and rejected (HTTP 400) on
+  Opus 4.7/4.8, Sonnet 5, and Fable 5** — migrate to adaptive thinking + `output_config.effort`.
+  Exact per-model knobs: [`provider-matrix.md`](provider-matrix.md).
+- **OpenAI (GPT-5.6)** — `reasoning.effort` + `text.verbosity` controls; lower effort for
+  classification/extraction/retrieval, higher for hard coding/debugging + a verification step.
+- **Google (Gemini 3.x)** — controllable **thinking level** + thought summaries; spend tokens only
+  when the task needs them (`thinking_budget` is superseded by `thinking_level`).
 - **General rule (Stop Overthinking survey 2025):** for simple classification/extraction, _lower_
   reasoning improves latency/cost with no quality loss; only complex multi-step work earns high effort.
 - **Steering the reasoning in-prompt (thinking off):** to suppress — "Thinking adds latency; use it
@@ -47,9 +52,9 @@ Match the reasoning budget to task difficulty — high effort is not free and ca
   through." Prefer a general "think thoroughly" over a hand-written step list — the model's own plan
   often beats yours.
 
-## Prefill is deprecated (Claude 4.6/4.7)
+## Prefill is unsupported on current Claude models
 
-Assistant-message prefill errors or is ignored on current Claude models. Migrations:
+Assistant-message prefill returns HTTP 400 on Claude 4.6 and later. Migrations:
 
 - **Force JSON/schema** → use **Structured Outputs** (`output_config` + `json_schema`) or a tool with an
   enum, not a prefill trick or "return only JSON" incantation.
@@ -71,11 +76,17 @@ Assistant-message prefill errors or is ignored on current Claude models. Migrati
 
 ## Sampling parameters (when you control them)
 
-- **Temperature** 0 = deterministic/greedy; higher = more random (beyond ~1 it dominates and can loop).
-  **CoT/single-correct-answer tasks: temp 0.** Self-consistency: raise temp to get diverse samples.
-- **Top-P / Top-K** shape the candidate pool; extreme settings cancel the others (temp 0 → top-k/p
-  irrelevant; k=1 → greedy). Google starting points: balanced `temp 0.2, top-P 0.95, top-K 30`;
-  creative `0.9 / 0.99 / 40`; conservative `0.1 / 0.9 / 20`.
+- **Current thinking models often forbid or discourage sampling overrides.** Claude 4.7+ returns
+  **HTTP 400** for non-default `temperature`/`top_p`/`top_k` — omit them and steer with the prompt.
+  Gemini 3.x guidance says to remove `temperature`/`top_p`/`top_k`; newer releases may ignore them or 400. OpenAI GPT-5.6 reasoning-model sampling restrictions were not confirmed in this refresh, and
+  OpenAI does not document `top_k` as a Responses API control. See [`provider-matrix.md`](provider-matrix.md).
+- **Sampling advice applies only to models that still accept it.** For older / non-reasoning models,
+  the knobs still shape diversity: **temp 0** = deterministic/greedy (use for single-correct-answer /
+  CoT tasks); raise temp for self-consistency sampling. **Top-P / Top-K** shape the candidate pool and
+  extreme settings cancel the others (temp 0 → top-k/p irrelevant; k=1 → greedy). Google starting
+  points: balanced `temp 0.2, top-P 0.95, top-K 30`; creative `0.9 / 0.99 / 40`; conservative
+  `0.1 / 0.9 / 20`. For current reasoning models, prefer effort/thinking controls, output contracts,
+  and evals over `temp=0` determinism folklore.
 - **Repetition-loop bug:** both extremes (too greedy / too random) can cause filler loops — tune toward
   the middle.
 - **Output length is a _stop_, not a compressor** — lowering max tokens truncates; it doesn't make the

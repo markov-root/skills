@@ -12,11 +12,13 @@ import time
 from situational_awareness.quota import reader
 from situational_awareness.quota.models import (
     DEFAULT_MAX_AGE_S,
+    DEFAULT_RELAX,
     DEFAULT_THRESHOLDS,
     DEFAULT_WINDOW_S,
     EXIT_CONTINUE,
     EXIT_WAIT,
     EXIT_WIND_DOWN,
+    WINDOW_SECONDS,
     QuotaReading,
     Window,
 )
@@ -24,8 +26,28 @@ from situational_awareness.quota.models import (
 RESET_TOL = 60  # s — "same window" if |Δresets_at| < tol (fix #11)
 
 
+def relaxed_max(base_max, ceiling, resets_in, window_s, fraction, enabled) -> float:
+    """Effective max used% that still says "continue", raised toward `ceiling` as
+    reset nears. Linear ramp over the final `fraction` of the window; unused quota
+    is wasted at reset, so spending closer to full is optimal near the boundary.
+
+    Strictly monotonic: the result is never below `base_max`. Conservative (returns
+    `base_max`) when disabled, when reset time is unknown, or when the ceiling would
+    not raise the threshold.
+    """
+    if not enabled or resets_in is None or fraction <= 0 or ceiling <= base_max:
+        return base_max
+    horizon = fraction * window_s
+    if horizon <= 0 or resets_in >= horizon:
+        return base_max
+    progress = 1.0 - (resets_in / horizon)  # 0 at horizon edge → 1 at reset
+    return round(base_max + (ceiling - base_max) * progress, 1)
+
+
 def _clamp_pct(x) -> float:
-    if x is None:  # fix #8 — present-but-null used_percentage → 0 (parity with .sh `// 0`)
+    if (
+        x is None
+    ):  # fix #8 — present-but-null used_percentage → 0 (parity with .sh `// 0`)
         return 0.0
     return round(min(100.0, max(0.0, float(x))), 1)  # fix #6
 
@@ -46,7 +68,9 @@ def burn(rows: list[dict], ukey: str, rkey: str, window_s: int, now: float):
     pts = [
         (r["ts"], float(r[ukey]), r.get(rkey))
         for r in rows
-        if r.get("ts") is not None and r.get(ukey) is not None and r["ts"] >= now - window_s
+        if r.get("ts") is not None
+        and r.get(ukey) is not None
+        and r["ts"] >= now - window_s
     ]
     pts.sort(key=lambda p: p[0])
     if len(pts) < 2:
@@ -96,14 +120,16 @@ def _ge(a, b) -> bool:
     return float(a) >= float(b)
 
 
-def _binding(u5, u7, th, rin5, rin7, eta5, eta7, over, available5, available7) -> str:
+def _binding(
+    u5, u7, eff_max5, eff_max7, rin5, rin7, eta5, eta7, over, available5, available7
+) -> str:
     if available5 and not available7:
         return "five_hour"
     if available7 and not available5:
         return "seven_day"
     if over:
-        b5 = available5 and _ge(u5, th["max_5h"])
-        b7 = available7 and _ge(u7, th["max_7d"])
+        b5 = available5 and _ge(u5, eff_max5)
+        b7 = available7 and _ge(u7, eff_max7)
         if b5 and b7:
             return "five_hour" if (rin5 or 0) >= (rin7 or 0) else "seven_day"
         return "five_hour" if b5 else "seven_day"
@@ -113,7 +139,7 @@ def _binding(u5, u7, th, rin5, rin7, eta5, eta7, over, available5, available7) -
         return "five_hour"
     if eta7 is not None:
         return "seven_day"
-    return "five_hour" if (th["max_5h"] - u5) <= (th["max_7d"] - u7) else "seven_day"
+    return "five_hour" if (eff_max5 - u5) <= (eff_max7 - u7) else "seven_day"
 
 
 def build_reading(
@@ -130,8 +156,18 @@ def build_reading(
     now: float | None = None,
     provider="claude-code",
     source="statusline",
+    relax=None,
+    relax_ceiling=None,
+    relax_fraction=None,
 ) -> QuotaReading:
     th = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+    relax = DEFAULT_RELAX["enabled"] if relax is None else bool(relax)
+    ceiling = (
+        DEFAULT_RELAX["ceiling"] if relax_ceiling is None else float(relax_ceiling)
+    )
+    fraction = (
+        DEFAULT_RELAX["fraction"] if relax_fraction is None else float(relax_fraction)
+    )
     now = now if now is not None else time.time()
 
     fh = rate_limits.get("five_hour") or {}
@@ -144,24 +180,66 @@ def build_reading(
     r7 = sd.get("resets_at") or None
     rin5, rin7 = _resets_in(r5, now), _resets_in(r7, now)
 
+    # Effective (near-reset-relaxed) thresholds. The whole warn→max band shifts up by
+    # the same proximity factor, so the gap (max − warn) is preserved and warn never
+    # drops below its configured value.
+    eff_max5 = relaxed_max(
+        th["max_5h"],
+        ceiling,
+        rin5,
+        WINDOW_SECONDS["five_hour"],
+        fraction,
+        relax and available5,
+    )
+    eff_max7 = relaxed_max(
+        th["max_7d"],
+        ceiling,
+        rin7,
+        WINDOW_SECONDS["seven_day"],
+        fraction,
+        relax and available7,
+    )
+    eff_warn5 = round(eff_max5 - (th["max_5h"] - th["warn_5h"]), 1)
+    eff_warn7 = round(eff_max7 - (th["max_7d"] - th["warn_7d"]), 1)
+
     rate5, _ = burn(history, "h5u", "h5r", window_s, now)
     rate7, _ = burn(history, "d7u", "d7r", window_s, now)
-    eta5, eta7 = eta(u5, th["max_5h"], rate5), eta(u7, th["max_7d"], rate7)
+    eta5, eta7 = eta(u5, eff_max5, rate5), eta(u7, eff_max7, rate7)
 
     over, sec_ok = False, 0
-    if available5 and _ge(u5, th["max_5h"]):
+    if available5 and _ge(u5, eff_max5):
         over, sec_ok = True, max(sec_ok, rin5 or 0)
-    if available7 and _ge(u7, th["max_7d"]):
+    if available7 and _ge(u7, eff_max7):
         over, sec_ok = True, max(sec_ok, rin7 or 0)
     if over:
         action, exit_code = "wait_for_reset", EXIT_WAIT
-    elif (available5 and _ge(u5, th["warn_5h"])) or (available7 and _ge(u7, th["warn_7d"])):
+    elif (available5 and _ge(u5, eff_warn5)) or (available7 and _ge(u7, eff_warn7)):
         action, sec_ok = "wind_down", 0
         exit_code = EXIT_WIND_DOWN if fail_on_warn else EXIT_CONTINUE
     else:
         action, sec_ok, exit_code = "continue", 0, EXIT_CONTINUE
 
-    binding = _binding(u5, u7, th, rin5, rin7, eta5, eta7, over, available5, available7)
+    binding = _binding(
+        u5, u7, eff_max5, eff_max7, rin5, rin7, eta5, eta7, over, available5, available7
+    )
+    relaxation = {
+        "enabled": relax,
+        "ceiling": ceiling,
+        "fraction": fraction,
+        "effective": {
+            "max_5h": eff_max5,
+            "warn_5h": eff_warn5,
+            "max_7d": eff_max7,
+            "warn_7d": eff_warn7,
+        },
+        "active": bool(
+            relax
+            and (
+                (available5 and eff_max5 > th["max_5h"])
+                or (available7 and eff_max7 > th["max_7d"])
+            )
+        ),
+    }
 
     if label is None and marks:
         label = marks[-1].get("label")
@@ -169,13 +247,15 @@ def build_reading(
     if label and marks:
         cost, costn = mark_cost(marks, label, provider)
         if cost and cost > 0:
-            headroom = th["max_5h"] - u5
+            headroom = eff_max5 - u5
             iters = max(0, math.floor(headroom / cost)) if headroom > 0 else 0
 
     stale = age is None or age > max_age  # fix #2
     # samples = count of ALL in-window history rows (matches the .sh `nsamp`: "how much
     # history do we have", independent of per-window nulls)
-    nsamp = sum(1 for h in history if h.get("ts") is not None and h["ts"] >= now - window_s)
+    nsamp = sum(
+        1 for h in history if h.get("ts") is not None and h["ts"] >= now - window_s
+    )
     forecast = {
         "samples": nsamp,
         "window_s": window_s,
@@ -193,9 +273,14 @@ def build_reading(
         seconds_until_ok=int(sec_ok),
         stale=stale,
         age_seconds=age,
-        five_hour=Window("five_hour", u5, round(100 - u5, 1), r5, rin5, rate5, eta5, available5),
-        seven_day=Window("seven_day", u7, round(100 - u7, 1), r7, rin7, rate7, eta7, available7),
+        five_hour=Window(
+            "five_hour", u5, round(100 - u5, 1), r5, rin5, rate5, eta5, available5
+        ),
+        seven_day=Window(
+            "seven_day", u7, round(100 - u7, 1), r7, rin7, rate7, eta7, available7
+        ),
         thresholds=th,
+        relaxation=relaxation,
         forecast=forecast,
         exit_code=exit_code,
         provider=provider,
@@ -203,7 +288,9 @@ def build_reading(
     )
 
 
-def read_quota(*, provider="claude-code", session_path=None, **kw) -> QuotaReading | dict:
+def read_quota(
+    *, provider="claude-code", session_path=None, **kw
+) -> QuotaReading | dict:
     """Top-level: load files and build a reading, or a degraded dict (status+exit)."""
     now = kw.get("now")
     rate_limits, age, status = reader.load_latest(

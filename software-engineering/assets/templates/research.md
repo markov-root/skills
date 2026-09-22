@@ -13,6 +13,7 @@ supersedes: ""
 superseded_by: ""
 engineering_document:
   version: 1
+  contract_tier: full
   role: research
   id: "NNNN"
   uid: research-YYYYMMDDTHHMMSSffffffZ-RANDOM8
@@ -35,6 +36,14 @@ engineering_document:
 ---
 
 # Research NNNN: Research question
+
+<!-- Quality bar — write to the Research content standard
+the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #research):
+a decision-relevant question stated up front · a reproducible method · sources with access dates ·
+claims typed by strength · rival/null/conflict/currency records retained · bounded conclusion.
+Discriminating test: can another investigator reproduce the selection and reasoning, derive the
+strongest rival, explain why it loses, and name what would reverse the ordering? Research informs
+decisions but is not decision authority. Delete this comment once the record is written. -->
 
 Research informs decisions but is not decision authority. If an ADR uses this deliberation, record
 one `derived-from` relationship in the ADR; do not add a duplicate `decided-by` edge here.

@@ -22,7 +22,15 @@ def render_inspection(report: dict[str, Any]) -> str:
     )
     resolution = report.get("root_resolution") or {}
     promotion_note: list[str] = []
-    if resolution.get("promoted"):
+    if resolution.get("promoted") and resolution.get("strategy") == "explicit":
+        promotion_note = [
+            (
+                f"- Warning: requested `{resolution['requested']}` resolved to "
+                f"`{resolution['resolved']}`; traversal remains anchored there and no ancestor "
+                "repository was substituted."
+            )
+        ]
+    elif resolution.get("promoted"):
         detail = (
             "it has no `engineering.yaml` of its own"
             if not resolution.get("requested_has_manifest")
@@ -69,6 +77,7 @@ def render_active_inspection(report: dict[str, Any]) -> str:
     lines = [
         "# Active repository inspection",
         "",
+        f"- Traversal root: `{report['root']}`",
         f"- Profiles: {', '.join(report['profiles'])}",
         f"- Target: {report['target']}",
         f"- Status: {report['status']}",

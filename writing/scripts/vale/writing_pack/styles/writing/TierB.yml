@@ -1,0 +1,17 @@
+extends: existence
+message: "review: the connective/adverb '%s' is overused in everyday prose and often a crutch. This is a review note, not a verdict — the connection may be earned."
+level: warning
+ignorecase: true
+scope: sentence
+tokens:
+  - "\\bmoreover\\b"
+  - "\\bfurthermore\\b"
+  - "\\badditionally\\b"
+  - "\\bnotably\\b"
+  - "\\bin addition\\b"
+  - "\\bconsequently\\b"
+  - "\\bas a result\\b"
+  - "\\bin conclusion\\b"
+  - "\\bin summary\\b"
+  - "\\bhence\\b"
+  - "\\bthus\\b"

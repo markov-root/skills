@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "commands": {
+    "budget": {
+      "runner": "exec",
+      "path": "scripts/budget"
+    },
+    "context-check": {
+      "runner": "exec",
+      "path": "scripts/context-check"
+    },
+    "usage-check": {
+      "runner": "exec",
+      "path": "scripts/usage-check"
+    },
+    "cache-check": {
+      "runner": "exec",
+      "path": "scripts/cache-check"
+    }
+  }
+}

@@ -15,6 +15,13 @@ superseded_by: ""
 
 # Changelog: TITLE
 
+<!-- Quality bar — write to the Changelog content standard
+the software-engineering skill knowledge file knowledge/documentation-living-content-standards.md (section #changelog):
+audience/scope named · each entry states the behavior or outcome, not the internal refactor ·
+breaking/action markers with migration actions · omissions disclosed. Discriminating test: can a
+non-contributor in the declared audience answer "what changed in my release, and what do I do?"
+without chasing the code? Delete this comment once the changelog is written. -->
+
 ## Unreleased
 
 Changes not yet released, grouped by type (added, changed, fixed, removed) as applicable.

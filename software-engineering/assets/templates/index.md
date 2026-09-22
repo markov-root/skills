@@ -15,6 +15,13 @@ superseded_by: ""
 
 # Index: TITLE
 
+<!-- Quality bar — write to the Index content standard
+the software-engineering skill knowledge file knowledge/documentation-meta-content-standards.md (section #index):
+generation provenance · links resolve · coverage matches registry allocation · grouping and
+summaries reduce cognitive load · gaps and authority/currentness represented honestly. Discriminating
+test: does it route a scoped reader to current authority and expose the territory's boundaries
+without silent omissions? Delete this comment once the index is written. -->
+
 ## Purpose
 
 What this index organizes and how to use it. Replace the title placeholder.

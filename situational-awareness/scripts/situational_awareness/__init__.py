@@ -4,4 +4,4 @@ Public surface (stable contract): the CLI JSON shape and exit codes. Internals
 (parsing, provider modules) are free to change. See SKILL.md for routing.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"

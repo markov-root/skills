@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from ..execution import run_process
+from ..policy.project_root import resolve_explicit_project_root
 from ..project.discovery import (
     DiscoveryError,
+    ObservedProject,
     Project,
     discover_instructions,
     discover_observation_root,
@@ -107,8 +109,29 @@ def inspect_repository(
     start: str | Path = ".",
     *,
     global_agents: str | Path | None = None,
+    exact_root: bool = False,
 ) -> dict[str, Any]:
-    observed = discover_observation_root(start)
+    if exact_root:
+        resolution = resolve_explicit_project_root(start)
+        discovered = discover_observation_root(resolution.root)
+        git_root = (
+            discovered.git_root
+            if discovered.git_root is not None and discovered.git_root.resolve() == resolution.root
+            else None
+        )
+        manifest = resolution.root / "engineering.yaml"
+        observed = ObservedProject(
+            resolution.root,
+            git_root,
+            manifest if manifest.is_file() else None,
+            requested=resolution.requested,
+            promoted=resolution.changed,
+            requested_manifest=resolution.requested_has_manifest,
+        )
+        serialized_resolution = resolution.to_dict()
+    else:
+        observed = discover_observation_root(start)
+        serialized_resolution = root_resolution(observed)
     root = observed.root.resolve()
     files, scan_truncated = _scan_files(root)
     relative_files = [path.relative_to(root).as_posix() for path in files]
@@ -133,7 +156,7 @@ def inspect_repository(
     return {
         "schema_version": 1,
         "root": str(root),
-        "root_resolution": root_resolution(observed),
+        "root_resolution": serialized_resolution,
         "repository": {
             "git": observed.git_root is not None,
             "scan_file_count": len(files),

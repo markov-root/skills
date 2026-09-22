@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..execution import resolve_executable
-from ..policy.manifest import Manifest, ManifestError, load_manifest
+from ..policy.manifest import Manifest, ManifestError, ManifestV2, load_manifest
 from ..policy.path_matching import matches_any
 from .classifier import BUILTINS
 from .health import CI_PATTERNS
@@ -57,32 +57,41 @@ def _missing_concrete_paths(manifest: Manifest, root: Path) -> list[dict[str, An
     root_resolved = root.resolve()
     findings: list[dict[str, Any]] = []
 
-    def record(field: str, name: str | None, relative: str, kind: str) -> None:
+    def record(
+        field: str,
+        name: str | None,
+        relative: str,
+        kind: str,
+        *,
+        project: str | None = None,
+    ) -> None:
         candidate = root / relative
         try:
             candidate.resolve().relative_to(root_resolved)
         except (OSError, ValueError):
-            findings.append(
-                {
-                    "field": field,
-                    "name": name,
-                    "path": relative,
-                    "kind": kind,
-                    "reason": "escapes_root",
-                }
-            )
+            finding = {
+                "field": field,
+                "name": name,
+                "path": relative,
+                "kind": kind,
+                "reason": "escapes_root",
+            }
+            if project is not None:
+                finding["project"] = project
+            findings.append(finding)
             return
         present = candidate.is_dir() if kind == "dir" else candidate.is_file()
         if not present:
-            findings.append(
-                {
-                    "field": field,
-                    "name": name,
-                    "path": relative,
-                    "kind": kind,
-                    "reason": "missing",
-                }
-            )
+            finding = {
+                "field": field,
+                "name": name,
+                "path": relative,
+                "kind": kind,
+                "reason": "missing",
+            }
+            if project is not None:
+                finding["project"] = project
+            findings.append(finding)
 
     for name, check in manifest.checks.items():
         if check.cwd not in (".", ""):
@@ -91,8 +100,27 @@ def _missing_concrete_paths(manifest: Manifest, root: Path) -> list[dict[str, An
         for reference in declaration.references:
             record("fitness.references", declaration.name, reference, "file")
     if manifest.docs.currency is not None:
-        for role in manifest.docs.currency.roles:
-            record("docs.currency.roles.index", role.name, role.index, "file")
+        if isinstance(manifest, ManifestV2):
+            for role in manifest.docs.currency.roles:
+                record(
+                    "docs.currency.roles.index",
+                    role.name,
+                    role.index,
+                    "file",
+                    project="global",
+                )
+            for scope in manifest.document_projects.projects:
+                for role in scope.currency.roles:
+                    record(
+                        "docs.currency.roles.index",
+                        role.name,
+                        role.index,
+                        "file",
+                        project=scope.id,
+                    )
+        else:
+            for role in manifest.docs.currency.roles:
+                record("docs.currency.roles.index", role.name, role.index, "file")
     for document in manifest.project.documents:
         record("project.documents", None, document, "file")
     return findings[:MAX_LIST]

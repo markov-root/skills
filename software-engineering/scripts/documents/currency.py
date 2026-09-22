@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
+from ..policy.document_paths import DocumentContainment, DocumentContainmentError
 from ..policy.manifest import DocsCurrencyPolicy, DocumentRolePolicy, TaskInventoryPolicy
 from .markdown import DocFinding, table_cells
 from .query import inventory
@@ -102,18 +103,26 @@ _RULES = {
 }
 
 
-def validate_currency(root: Path, policy: DocsCurrencyPolicy | None) -> tuple[CurrencyFinding, ...]:
+def validate_currency(
+    root: Path,
+    policy: DocsCurrencyPolicy | None,
+    *,
+    docs_root: Path | None = None,
+) -> tuple[CurrencyFinding, ...]:
     """Validate only explicitly adopted currency invariants."""
     if policy is None:
         return ()
     root = root.resolve()
+    containment = (
+        None if docs_root is None else DocumentContainment.for_project_docs(root, docs_root)
+    )
     findings: list[CurrencyFinding] = []
     for role in policy.roles:
-        _validate_role(root, role, findings)
+        _validate_role(root, role, findings, containment=containment)
     for pointer in policy.required_current_truth:
-        _validate_required_pointer(root, pointer, findings)
+        _validate_required_pointer(root, pointer, findings, containment=containment)
     if policy.done_task_evidence is not None:
-        _validate_done_task_evidence(root, policy, findings)
+        _validate_done_task_evidence(root, policy, findings, containment=containment)
     return tuple(sorted(findings, key=lambda item: (item.path, item.line, item.code, item.message)))
 
 
@@ -121,9 +130,11 @@ def _validate_role(
     root: Path,
     role: DocumentRolePolicy,
     findings: list[CurrencyFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> None:
-    documents = _expand(root, role.include, findings)
-    index = _contained_path(root, role.index, findings)
+    documents = _expand(root, role.include, findings, containment=containment)
+    index = _contained_path(root, role.index, findings, containment=containment)
     documents = tuple(path for path in documents if index is None or path != index)
     if not documents:
         findings.append(
@@ -179,7 +190,7 @@ def _validate_role(
         return
 
     index_text = _read(index, root, findings)
-    links = _local_links(root, index, index_text)
+    links = _local_links(root, index, index_text, findings, containment=containment)
     document_set = set(documents)
     indexed: dict[Path, tuple[int, str]] = {}
     for target, line, source_line in links:
@@ -251,8 +262,10 @@ def _validate_required_pointer(
     root: Path,
     relative: str,
     findings: list[CurrencyFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> None:
-    path = _contained_path(root, relative, findings)
+    path = _contained_path(root, relative, findings, containment=containment)
     if path is not None and not path.is_file():
         findings.append(
             _finding(
@@ -268,6 +281,8 @@ def _validate_done_task_evidence(
     root: Path,
     policy: DocsCurrencyPolicy,
     findings: list[CurrencyFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> None:
     declaration = policy.done_task_evidence
     if declaration is None:
@@ -275,6 +290,7 @@ def _validate_done_task_evidence(
     report = inventory(
         root,
         TaskInventoryPolicy(include=declaration.include, handoffs=(), decisions=()),
+        docs_root=None if containment is None else containment.docs_root,
     )
     for issue in report["findings"]:
         if issue["code"] == "source.outside-root":
@@ -299,7 +315,7 @@ def _validate_done_task_evidence(
         if task["status"] != "done":
             continue
         relative = task["provenance"]["path"]
-        path = _contained_path(root, relative, findings)
+        path = _contained_path(root, relative, findings, containment=containment)
         if path is None or not path.is_file():
             continue
         text = _read(path, root, findings)
@@ -340,13 +356,38 @@ def _expand(
     root: Path,
     patterns: tuple[str, ...],
     findings: list[CurrencyFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> tuple[Path, ...]:
     found: set[Path] = set()
     for pattern in patterns:
-        for candidate in root.glob(pattern):
+        if containment is not None:
+            try:
+                candidates = containment.expand_project_glob(
+                    pattern,
+                    purpose="currency source",
+                )
+            except DocumentContainmentError as exc:
+                findings.append(
+                    _finding(
+                        "currency.source-outside-root",
+                        pattern,
+                        1,
+                        str(exc),
+                    )
+                )
+                continue
+        else:
+            candidates = root.glob(pattern)
+        for candidate in candidates:
             if not candidate.is_file():
                 continue
-            resolved = _contained_candidate(root, candidate, findings)
+            resolved = _contained_candidate(
+                root,
+                candidate,
+                findings,
+                containment=containment,
+            )
             if resolved is None:
                 continue
             found.add(resolved)
@@ -367,15 +408,45 @@ def _contained_path(
     root: Path,
     relative: str,
     findings: list[CurrencyFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> Path | None:
-    return _contained_candidate(root, root / relative, findings)
+    return _contained_candidate(
+        root,
+        root / relative,
+        findings,
+        containment=containment,
+    )
 
 
 def _contained_candidate(
     root: Path,
     candidate: Path,
     findings: list[CurrencyFinding],
+    *,
+    containment: DocumentContainment | None = None,
 ) -> Path | None:
+    if containment is not None:
+        try:
+            return containment.require_project_path(
+                candidate,
+                purpose="configured documentation source",
+                must_exist=False,
+            )
+        except (DocumentContainmentError, OSError, RuntimeError, ValueError):
+            try:
+                relative = candidate.relative_to(root).as_posix()
+            except ValueError:
+                relative = "."
+            findings.append(
+                _finding(
+                    "currency.source-outside-root",
+                    relative,
+                    1,
+                    "configured documentation source resolves outside the selected docs_root",
+                )
+            )
+            return None
     try:
         resolved = candidate.resolve()
         resolved.relative_to(root)
@@ -411,7 +482,14 @@ def _read(path: Path, root: Path, findings: list[CurrencyFinding]) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _local_links(root: Path, index: Path, text: str) -> tuple[tuple[Path, int, str], ...]:
+def _local_links(
+    root: Path,
+    index: Path,
+    text: str,
+    findings: list[CurrencyFinding],
+    *,
+    containment: DocumentContainment | None = None,
+) -> tuple[tuple[Path, int, str], ...]:
     lines = text.splitlines()
     found: list[tuple[Path, int, str]] = []
     for token in MARKDOWN.parse(text):
@@ -428,7 +506,19 @@ def _local_links(root: Path, index: Path, text: str) -> tuple[tuple[Path, int, s
             split = urlsplit(destination)
             if split.scheme or not split.path:
                 continue
-            candidate = (index.parent / unquote(split.path)).resolve()
+            candidate = index.parent / unquote(split.path)
+            if containment is not None:
+                resolved = _contained_candidate(
+                    root,
+                    candidate,
+                    findings,
+                    containment=containment,
+                )
+                if resolved is None:
+                    continue
+                found.append((resolved, line, source_line))
+                continue
+            candidate = candidate.resolve()
             try:
                 candidate.relative_to(root)
             except ValueError:

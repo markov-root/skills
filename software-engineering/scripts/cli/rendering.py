@@ -66,7 +66,15 @@ def render_explanations(explanations: tuple[Explanation, ...], *, detailed: bool
 def emit(payload: dict[str, Any], *, json_output: bool, human: str | None) -> None:
     if json_output:
         print(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str))
-    elif human is not None:
+        return
+    if human is not None:
         print(human)
-    else:
-        print(f"{payload['command']}: {payload['status']}")
+        return
+    lines = [f"{payload['command']}: {payload['status']}"]
+    for error in payload.get("errors") or ():
+        if error:
+            lines.append(f"error: {error}")
+    for next_command in payload.get("next_commands") or ():
+        if next_command:
+            lines.append(f"next: {next_command}")
+    print("\n".join(lines))

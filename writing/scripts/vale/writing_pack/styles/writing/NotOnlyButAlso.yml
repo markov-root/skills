@@ -1,0 +1,7 @@
+extends: existence
+message: "review: the correlative 'not only ... but also' is a canned parallel construction. This is a review note, not a verdict — weigh whether the structure earns its place."
+level: warning
+ignorecase: true
+scope: sentence
+tokens:
+  - "\\bnot only[^;.]*?\\bbut also\\b"

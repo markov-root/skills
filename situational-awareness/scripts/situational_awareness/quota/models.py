@@ -10,6 +10,17 @@ DEFAULT_THRESHOLDS = {"warn_5h": 80.0, "max_5h": 90.0, "warn_7d": 80.0, "max_7d"
 DEFAULT_WINDOW_S = 1800  # burn-rate lookback
 DEFAULT_MAX_AGE_S = 900  # staleness cutoff
 
+# nominal window durations (s) — fixed by the window's semantics, used to scale the
+# near-reset relaxation horizon per window.
+WINDOW_SECONDS = {"five_hour": 5 * 3600, "seven_day": 7 * 86400}
+
+# Near-reset relaxation: unused quota is wasted at reset, so the effective max used%
+# that still says "continue" ramps linearly from the configured max up to `ceiling`
+# as reset nears, starting once time-to-reset drops below `fraction` of the window.
+# fraction 3/7 ⇒ the final 72h weekly / ~2.1h five-hour. Default-on; conservative
+# only when reset time is unknown (no relaxation then).
+DEFAULT_RELAX = {"enabled": True, "ceiling": 99.9, "fraction": 3 / 7}
+
 # exit codes (mirror usage-check exactly — load-bearing for gates)
 EXIT_CONTINUE = 0
 EXIT_WIND_DOWN = 11
@@ -58,6 +69,7 @@ class QuotaReading:
     exit_code: int = EXIT_CONTINUE
     provider: str = "claude-code"
     source: str = "statusline"
+    relaxation: dict | None = None  # near-reset relaxation state (None ⇒ disabled)
 
     def to_dict(self) -> dict:
         return {
@@ -70,6 +82,7 @@ class QuotaReading:
             "five_hour": self.five_hour.to_dict(),
             "seven_day": self.seven_day.to_dict(),
             "thresholds": self.thresholds,
+            "relaxation": self.relaxation,
             "forecast": self.forecast,
             "provider": self.provider,
             "source": self.source,

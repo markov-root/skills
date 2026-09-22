@@ -67,6 +67,14 @@ files assert.
 | Metacognitive demands & opportunities of generative AI                              | Microsoft Research              | https://www.microsoft.com/en-us/research/publication/the-metacognitive-demands-and-opportunities-of-generative-ai/       | 2026-08-18 | verified | teaching | src-teach | —              |
 | Prompting as a poor end-user interface (shape intent, don't demand perfect prompts) | Google DeepMind                 | https://deepmind.google/research/publications/90773/                                                                     | 2026-08-18 | verified | teaching | src-teach | —              |
 
+## Evaluation (why self-feedback drifts)
+
+| Source                                                                                                                                                       | Publisher / Author                 | URL                                                          | Accessed   | Status   | Informs    | Groups   | Re-verify when                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- | ------------------------------------------------------------ | ---------- | -------- | ---------- | -------- | ------------------------------------------ |
+| Goodhart's law ("when a measure becomes a target, it ceases to be a good measure")                                                                           | Wikipedia                          | https://en.wikipedia.org/wiki/Goodhart%27s_law               | 2026-08-19 | verified | evaluation | src-eval | —                                          |
+| Feedback source taxonomy (explicit_user / observed_user / agent_judgment / deterministic / independent_evaluation) — "never infer satisfaction from silence" | internal: skill-feedback skill     | ../../../skill-feedback/public/SKILL.md                      | 2026-08-19 | verified | evaluation | src-eval | the skill-feedback source contract changes |
+| LLM-as-judge design (for the independent-evaluation path)                                                                                                    | internal: prompt-engineering skill | ../../../prompt-engineering/public/knowledge/llm-as-judge.md | 2026-08-19 | verified | evaluation | src-eval | —                                          |
+
 ## Notes
 
 - Sources were gathered via live web research passes on 2026-08-18 (a market scan
