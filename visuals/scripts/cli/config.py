@@ -17,9 +17,7 @@ Design constraints, binding:
   colour, or a layout. Design tokens live in the theme (ADR 0005), never here.
 - Task 0003 criterion 4: an invalid config reports the offending key, the
   expected shape, and the file and line — never a stack trace. `ConfigError`
-  carries all four; `tomllib` reports no line numbers, so parsing is done by a
-  small line-tracking TOML reader that is cross-checked against `tomllib` in
-  the test suite (`dev/tests/test_config.py`).
+  carries all four. `tomllib` parses values; a separate pass indexes key lines.
 - Criterion 7: the schema is versioned; an unknown version is rejected
   explicitly, never guessed.
 
@@ -153,279 +151,41 @@ class ResolvedConfig:
 # Line-tracking TOML reading
 # ---------------------------------------------------------------------------
 
-_BARE_KEY = r"[A-Za-z0-9_-]+"
-_RE_TABLE = re.compile(rf"^\s*\[\s*({_BARE_KEY}(?:\.{_BARE_KEY})*)\s*\]\s*$")
-_RE_ARRAY_TABLE = re.compile(rf"^\s*\[\[\s*({_BARE_KEY}(?:\.{_BARE_KEY})*)\s*\]\]\s*$")
-_RE_KV = re.compile(rf"^\s*({_BARE_KEY})\s*=\s*(\S.*)$")
-_RE_STRING = re.compile(r'^"([^"\\]|\\.)*"$|^\'[^\']*\'$')
-_RE_ARRAY = re.compile(r"^\[.*\]$", re.S)
-_RE_INT = re.compile(r"^[+-]?[0-9](_?[0-9])*$")
-_RE_FLOAT = re.compile(r"^[+-]?([0-9](_?[0-9])*)?\.[0-9](_?[0-9])*([eE][+-]?[0-9]+)?$|^[+-]?[0-9](_?[0-9])*[eE][+-]?[0-9]+$")
+_KEY_PART = r'(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|\'[^\']*\')'
+_KEY_PATH = rf'{_KEY_PART}(?:\s*\.\s*{_KEY_PART})*'
+_RE_HEADER = re.compile(rf'^\s*(\[\[|\[)\s*({_KEY_PATH})\s*(\]\]|\])\s*(?:#.*)?$')
+_RE_ASSIGNMENT = re.compile(rf'^\s*({_KEY_PATH})\s*=', re.S)
 
 
-def _strip_comment(line: str) -> str:
-    """Remove a # comment, respecting quoted strings (no multi-line strings in
-    configs this parses: values are scalars or single-line arrays)."""
-    out = []
-    quote = None
-    i = 0
-    while i < len(line):
-        ch = line[i]
-        if quote:
-            out.append(ch)
-            if ch == quote:
-                quote = None
-        else:
-            if ch == "#":
-                break
-            out.append(ch)
-            if ch in ('"', "'"):
-                quote = ch
-        i += 1
-    return "".join(out).rstrip()
-
-
-_RE_INLINE_TABLE = re.compile(r"^\{\s*(.*)\s*\}$", re.S)
-
-
-def _parse_scalar(text: str) -> Any:
-    """Parse one TOML scalar or single-line array. Raises ValueError if the
-    shape is not recognised (the caller converts this to a ConfigError)."""
-    text = text.strip()
-    if _RE_STRING.match(text):
-        body = text[1:-1]
-        if text[0] == '"':
-            body = (
-                body.replace(r"\"", '"')
-                .replace(r"\\", "\\")
-                .replace(r"\t", "\t")
-                .replace(r"\n", "\n")
-            )
-        return body
-    if text in ("true", "false"):
-        return text == "true"
-    if _RE_INT.match(text):
-        return int(text.replace("_", ""))
-    if _RE_FLOAT.match(text):
-        return float(text.replace("_", ""))
-    if _RE_INLINE_TABLE.match(text):
-        inner = text[1:-1].strip()
-        result: dict[str, Any] = {}
-        if not inner:
-            return result
-        parts: list[str] = []
-        quote = None
-        depth = 0
-        start = 0
-        for i, ch in enumerate(inner):
-            if quote:
-                if ch == quote:
-                    quote = None
-            elif ch in ('"', "'"):
-                quote = ch
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-            elif ch == "," and depth == 0:
-                parts.append(inner[start:i])
-                start = i + 1
-        parts.append(inner[start:])
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
-            km = re.match(rf"^({_BARE_KEY})\s*=\s*(.*)$", part, re.S)
-            if not km:
-                raise ValueError(f"unsupported inline table entry: {part[:60]!r}")
-            result[km.group(1)] = _parse_scalar(km.group(2))
-        return result
-    if _RE_ARRAY.match(text):
-        inner = text[1:-1].strip()
-        if not inner:
-            return []
-        parts: list[str] = []
-        quote = None
-        depth = 0
-        start = 0
-        for i, ch in enumerate(inner):
-            if quote:
-                if ch == quote:
-                    quote = None
-            elif ch in ('"', "'"):
-                quote = ch
-            elif ch == "[":
-                depth += 1
-            elif ch == "]":
-                depth -= 1
-            elif ch == "," and depth == 0:
-                parts.append(inner[start:i])
-                start = i + 1
-        parts.append(inner[start:])
-        return [_parse_scalar(p) for p in parts if p.strip()]
-    raise ValueError(f"unsupported TOML value: {text[:60]!r}")
+def _key_parts(key: str) -> tuple[str, ...]:
+    """Let tomllib interpret quoted and dotted keys; never parse their syntax twice."""
+    parsed = tomllib.loads(f"{key} = 0")
+    parts: list[str] = []
+    while isinstance(parsed, dict):
+        part, parsed = next(iter(parsed.items()))
+        parts.append(part)
+    return tuple(parts)
 
 
 def _read_toml_tracked(path: Path) -> tuple[dict[str, Any], dict[tuple[str, ...], int]]:
-    """Parse a visuals.toml into (data, lines) where `lines` maps each dotted
-    key path to the 1-based line it was declared on. Raises tomllib.TOMLDecodeError
-    only if this parser and tomllib disagree on well-formedness — a defect in
-    this module, surfaced loudly rather than misreported as a config error.
-    """
+    """Parse with tomllib, then index declaration lines without interpreting values."""
     raw = path.read_text(encoding="utf-8")
-    logical: list[tuple[int, str]] = []  # (1-based line, logical text)
-    buffer = ""
-    start_line = 0
-    for lineno, line in enumerate(raw.splitlines(), start=1):
-        cleaned = _strip_comment(line).strip()
-        if not cleaned:
-            # A blank or all-comment line must not join an open multi-line
-            # array and must not start one: bracket counts in prose (this
-            # file's own header comment) are not structure.
-            if not buffer:
-                continue
-            cleaned = ""
-        if buffer:
-            logical_text = buffer + " " + cleaned
-            logical_line = start_line
-        else:
-            logical_text = cleaned
-            logical_line = lineno
-        if logical_text.count("[") > logical_text.count("]"):
-            # An array literal split across lines: keep accumulating.
-            if not buffer:
-                start_line = lineno
-            buffer = logical_text
-            continue
-        buffer = ""
-        if logical_text and (
-            _RE_KV.match(logical_text)
-            or _RE_TABLE.match(logical_text)
-            or _RE_ARRAY_TABLE.match(logical_text)
-            or logical_text in ("[", "]", "]}")  # bare array closer, joined later
-        ):
-            logical.append((logical_line, logical_text))
-        elif logical_text:
-            # A non-empty line that is neither a table header nor key = value.
-            # tomllib rejects such text outright; this parser must not swallow
-            # it into an empty config and let the schema produce a misleading
-            # "missing key" error instead of the true syntax error.
-            raise tomllib.TOMLDecodeError(
-                f"{path}:{lineno}: cannot parse: {logical_text[:60]!r}"
-            )
-
-    data: dict[str, Any] = {}
+    data = tomllib.loads(raw)
     lines: dict[tuple[str, ...], int] = {}
-    if buffer:
-        # An unterminated multi-line array (or any unterminated bracket) at
-        # EOF: tomllib rejects the file, and so must this parser — silently
-        # dropping the buffered tail would invent a different document.
-        raise tomllib.TOMLDecodeError(
-            f"{path}: unterminated bracketed value starting at line {start_line}"
-        )
-    table: list[str] | None = None  # current dotted table path; None = root
-    is_array_table = False  # the current table header was [[...]] (array of tables)
-    for lineno, text in logical:
-        m = _RE_ARRAY_TABLE.match(text)
-        if m:
-            table = m.group(1).split(".")
-            _ensure_tables(data, lines, table, lineno, is_array=True)
-            lines.setdefault(tuple(table), lineno)
-            is_array_table = True
+    table: tuple[str, ...] = ()
+    for lineno, line in enumerate(raw.splitlines(), start=1):
+        header = _RE_HEADER.match(line)
+        if header and (header.group(1), header.group(3)) in (("[", "]"), ("[[", "]]")):
+            table = _key_parts(header.group(2))
+            for depth in range(1, len(table) + 1):
+                lines.setdefault(table[:depth], lineno)
             continue
-        m = _RE_TABLE.match(text)
-        if m:
-            table = m.group(1).split(".")
-            _ensure_tables(data, lines, table, lineno, is_array=False)
-            lines.setdefault(tuple(table), lineno)
-            is_array_table = False
-            continue
-        m = _RE_KV.match(text)
-        if not m:
-            raise tomllib.TOMLDecodeError(
-                f"internal parser could not read {path}:{lineno} ({text[:60]!r})"
-            )
-        key, value_text = m.group(1), m.group(2)
-        try:
-            value = _parse_scalar(value_text)
-        except ValueError as exc:
-            raise tomllib.TOMLDecodeError(f"{path}:{lineno}: {exc}") from None
-        if table is None:
-            # Root-level bare key (before any table header): schema_version,
-            # theme, advisory_checks live here.
-            lines.setdefault((key,), lineno)
-            if key in data:
-                raise tomllib.TOMLDecodeError(f"{path}:{lineno}: duplicate key {key!r}")
-            data[key] = value
-            continue
-        if is_array_table:
-            # A bare key under [[hooks]] belongs to the array's newest entry.
-            target = data
-            for part in table[:-1]:
-                target = target[part]
-            target = target[table[-1]][-1]
-            if key in target:
-                raise tomllib.TOMLDecodeError(f"{path}:{lineno}: duplicate key {key!r}")
-            target[key] = value
-            lines[tuple([*table, key])] = lineno
-            continue
-        target = _ensure_tables(data, lines, table, lineno, is_array=False)
-        if key in target:
-            raise tomllib.TOMLDecodeError(f"{path}:{lineno}: duplicate key {key!r}")
-        target[key] = value
-        lines[tuple([*table, key])] = lineno
+        assignment = _RE_ASSIGNMENT.match(line)
+        if assignment:
+            key = (*table, *_key_parts(assignment.group(1)))
+            for depth in range(1, len(key) + 1):
+                lines[key[:depth]] = lineno
     return data, lines
-
-
-def _ensure_tables(
-    data: dict[str, Any],
-    lines: dict[tuple[str, ...], int],
-    path: list[str],
-    lineno: int,
-    is_array: bool,
-) -> dict[str, Any]:
-    """Walk/create the nested tables at `path` and return the dict new keys
-    belong to. For an array-of-tables header ([[hooks]]) a fresh entry dict is
-    appended to the list each time; redefining a table as a value (or the
-    reverse) is a loud defect."""
-    target = data
-    walked: list[str] = []
-    for part in path[:-1]:
-        walked.append(part)
-        node = target.get(part)
-        if node is None:
-            node = {}
-            target[part] = node
-            lines.setdefault(tuple(walked), lineno)
-        elif not isinstance(node, dict):
-            raise tomllib.TOMLDecodeError(
-                f"line {lineno}: {part!r} is both a value and a table"
-            )
-        target = node
-    last = path[-1]
-    walked.append(last)
-    node = target.get(last)
-    if is_array:
-        if node is None:
-            node = []
-            target[last] = node
-            lines.setdefault(tuple(walked), lineno)
-        if not isinstance(node, list):
-            raise tomllib.TOMLDecodeError(
-                f"line {lineno}: {last!r} is both a table and an array of tables"
-            )
-        entry: dict[str, Any] = {}
-        node.append(entry)
-        return entry
-    if node is None:
-        node = {}
-        target[last] = node
-        lines.setdefault(tuple(walked), lineno)
-    elif not isinstance(node, dict):
-        raise tomllib.TOMLDecodeError(
-            f"line {lineno}: {last!r} is both a value and a table"
-        )
-    return node
 
 
 # ---------------------------------------------------------------------------
@@ -457,7 +217,9 @@ def _expected_of(schema_node: dict[str, Any]) -> str:
 
 
 def _err(key: str, expected: str, file: Path, lines: dict[tuple[str, ...], int]) -> ConfigError:
-    dotted = tuple(key.split(".")) if key else ()
+    dotted = tuple(re.sub(r"\[\d+\]$", "", part) for part in key.split(".")) if key else ()
+    while dotted and dotted not in lines:
+        dotted = dotted[:-1]
     return ConfigError(key, expected, file, lines.get(dotted))
 
 

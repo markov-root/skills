@@ -23,7 +23,7 @@ compatibility: >-
   the authored-render engine. The `image-generation` skill is an optional
   delegate, capability-detected and never a hard dependency.
 metadata:
-  version: "0.5.0"
+  version: "0.5.1"
 ---
 
 # visuals
@@ -35,7 +35,7 @@ holds them together. It deliberately owns **no opinion about what a graphic
 draws**; scaffolds emit contract wiring only, and no command ranks, scores, or
 grades a design.
 
-## Status at this version (0.5.0)
+## Status at this version (0.5.1)
 
 Implemented: `bump`, `data`, `doctor`, `image`, `index`, `init`, `new`,
 `render`, `sources`, `theme`, `validate`, plus project-declared named styles and

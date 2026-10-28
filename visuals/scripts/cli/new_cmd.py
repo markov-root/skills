@@ -72,7 +72,11 @@ def main(argv: list[str]) -> int:
         return 2  # usage
 
     cwd = Path.cwd()
-    config_resolved = config.resolve_config(cwd)
+    try:
+        config_resolved = config.resolve_config(cwd)
+    except config.ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if config_resolved is None:
         message = (
             f"refusing to scaffold: no {config.CONFIG_NAME} resolves from {cwd} — "

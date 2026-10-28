@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1 — 2026-10-28
+
+- **The config reader accepts the TOML the schema advertises (task 0022).** `_read_toml_tracked`
+  was a hand-rolled line-tracking parser that accepted a subset of the language it claimed to read:
+  an array of inline tables — the natural way to write `scaffold.<style>.includes`, and the shape
+  the schema *requires* — failed with "unsupported TOML value" in both single- and multi-line form,
+  as did a quoted key in a table header. Values now come from stdlib `tomllib` with a separate
+  declaration-line index, so the `file:line` citation that justified the hand-rolled parser is
+  preserved while the language is no longer second-guessed.
+- **A config error is one line and exit `2`, not a traceback.** It names the file, line, key and
+  expectation, which is what `SKILL.md`'s own exit-code contract always claimed. Previously a
+  malformed `visuals.toml` produced a Python stack trace into `config.py`.
+  Non-regression: 28/28 comparable visuals still reproduce byte-identically, 0 differing,
+  0 non-deterministic.
+
 ## 0.5.0 — 2026-10-28
 
 - **New `knowledge/` layer (task 0018), discharging the obligation ADR 0002 created and ADR 0007
