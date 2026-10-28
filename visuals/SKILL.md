@@ -1,21 +1,19 @@
 ---
 name: visuals
 description: >-
-  Produce explanatory graphics — slides, posters, figures, diagrams, charts
-  — under an enforced production contract, with routed knowledge on making
-  one well: composition, staged builds, encoding and colour, annotation,
-  axes, source credit, release check. The knowledge teaches; no command
-  enforces it and it ships no colour, font, or measurement. `render` drives
-  headless Chrome over a frame manifest, waiting on an explicit readiness
-  signal rather than a fixed time budget, into immutable versioned
-  directories with per-frame SHA-256 receipts; `bump` derives the next
-  version. `validate` reports exactly four blocking conditions separately
-  from advisory findings that never block. `new` scaffolds contract wiring
-  onto a bare canvas; `index` derives portfolio status and declared style;
-  `sources` and `data snapshot` hash-lock provenance; `image` delegates
-  generation; `init` adopts a project. Do NOT use to generate raster images
-  (image-generation), design a chart from data (dataviz), or review a UI
-  (ux-engineering).
+  Produce explanatory graphics — slides, posters, figures, diagrams, charts —
+  under a production contract, with routed knowledge on composition, staged
+  builds, encoding, annotation, axes, sources, and release checks. `render`
+  captures a frame manifest in headless Chrome after an explicit readiness
+  signal, into immutable versions with SHA-256 receipts; `bump` derives the
+  next version. `measure` reports selector-keyed scene geometry, actual glyph
+  fonts, bounded CSS paint composition, and explicit unknowns. `validate`
+  separates exactly four blocking conditions from advisory findings. `new`
+  scaffolds a bare canvas; `index` derives portfolio status; `sources` and
+  `data snapshot` hash-lock provenance; `image` delegates generation; `init`
+  adopts a project. No command ranks designs. For raster generation use
+  image-generation; for chart design use dataviz; for UI review use
+  ux-engineering.
 license: Apache-2.0
 compatibility: >-
   Requires Python 3.11+ (stdlib only for the dispatcher); `uv` for the
@@ -23,7 +21,7 @@ compatibility: >-
   the authored-render engine. The `image-generation` skill is an optional
   delegate, capability-detected and never a hard dependency.
 metadata:
-  version: "0.5.1"
+  version: "0.6.0"
 ---
 
 # visuals
@@ -35,11 +33,11 @@ holds them together. It deliberately owns **no opinion about what a graphic
 draws**; scaffolds emit contract wiring only, and no command ranks, scores, or
 grades a design.
 
-## Status at this version (0.5.1)
+## Status at this version (0.6.0)
 
 Implemented: `bump`, `data`, `doctor`, `image`, `index`, `init`, `new`,
-`render`, `sources`, `theme`, `validate`, plus project-declared named styles and
-the `knowledge/` layer. Not yet built: the measurement loop (`measure`, `check`,
+`render`, `measure`, `sources`, `theme`, `validate`, plus project-declared named styles and
+the `knowledge/` layer. Not yet built: the remaining measurement loop (`check`,
 `probe`). The registry (`scripts/cli/registry.py`) exposes exactly what exists —
 roadmap commands are absent rather than stubbed, so the CLI never advertises
 capability it does not have.

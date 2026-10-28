@@ -50,6 +50,33 @@ anything whose contrast was marginal.
 fix. Reflowing the layout, changing the type hierarchy, or raising contrast may recover it; if none
 of those do, the graphic is carrying more than it can at this size, and something comes out.
 
+## 3b. Check it is *finished*, not merely correct `[core]`
+
+A graphic can satisfy every rule in this knowledge and still be thin. This is the most common way a
+competent graphic falls short of a good one, and no rule above catches it, because every rule above
+is a constraint — a thing not to do — and thinness is an absence.
+
+**List the parts a finished graphic of this family carries, then check each one is present and
+pulling its weight.** For a chart with a commentary rail that list is typically: the plot, the
+legend, the direct labels, the axis treatment, each rail block, the pinned definition, and every
+element of the attribution band. If your project declares styles, the style's description is where
+that list belongs; if it does not, write the list in the brief before you build.
+
+Two specific symptoms worth naming, because both look like restraint and are not:
+
+- **An element present but under-loaded.** A matrix cell carrying only a score, where the data also
+  supports an interval and a denominator. A rail block carrying one sentence where the data supports
+  a figure and a sentence. Ask of each element: *what else does the data already justify putting
+  here?* Adding information to an element that already exists costs no layout and is the cheapest
+  improvement available.
+- **A region left empty by accident.** A commentary column with one block and a large gap below it
+  is not minimalism; it is an unanswered question about what else the reader needs. Either fill it
+  or narrow the column.
+
+The test: put your graphic beside an existing one from the same family and ask **what the other one
+tells a reader that yours does not.** If you have no sibling to compare against, you are also
+deciding the family's conventions, and should write them down.
+
 ## 4. Check the claims, not just the pixels `[core]`
 
 Walk the questions from [`numbers-and-claims.md`](numbers-and-claims.md):

@@ -432,6 +432,23 @@ THEME_SPEC = CommandSpec(
     handler="theme_cmd",
 )
 
+MEASURE_SPEC = CommandSpec(
+    name="measure",
+    usage="measure <slug> [--max-bytes N]",
+    summary="Report selector-keyed scene geometry, rendered fonts, bounded background paint, and stage differences.",
+    help_text=(
+        "Measure every manifest frame of <slug> after render readiness. Emits a\n"
+        "versioned JSON report with selector-keyed element and text geometry,\n"
+        "platform fonts actually used for glyphs, bounded CSS background\n"
+        "composition, contrast, sibling overlap, annotations, and geometry\n"
+        "differences between stages. Unsupported paint returns null rather\n"
+        "than an invented colour. No findings, severities, scores, or gates.\n"
+        "The report is capped at 1 MB; overflow errors without partial JSON."
+    ),
+    backend="stdlib",
+    handler="measure_cmd",
+)
+
 VALIDATE_SPEC = CommandSpec(
     name="validate",
     usage="validate [<slug>] [--json]",
@@ -491,6 +508,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     IMAGE_SPEC,
     INDEX_SPEC,
     INIT_SPEC,
+    MEASURE_SPEC,
     NEW_SPEC,
     RENDER_SPEC,
     SOURCES_SPEC,

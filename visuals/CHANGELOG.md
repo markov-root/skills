@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.6.0 — 2026-10-28
+
+- **New `measure` command (task 0011), and an honest limit.** A read-only instrument evaluated
+  inside the rendered document, emitting a selector-keyed report: per text node the content,
+  computed and effective size, the font **actually used for glyphs**, contrast and bounding box;
+  per element overflow and sibling overlap; and across stage URLs a bounding-box difference table
+  that makes the stable-geometry contract computable. It reports; it never judges. No finding, no
+  severity, no score — deciding whether a measurement matters is task 0012, and ADR 0004's blocking
+  set stays at four.
+  **Font fallback is solved correctly.** Computed `fontFamily` retains a face that failed to load,
+  so it lies; the instrument reports the platform fonts actually used to draw glyphs instead, and
+  adversarial fixtures cover a missing `@font-face` source, a webfont that loads, and a family that
+  exists only in the fallback stack.
+  **Composited background is NOT solved, and says so.** ADR 0003 named this and font detection as
+  the two measurements most likely to be confidently wrong. The available API returns a gradient's
+  *stops* rather than the composited colour behind a label, so unsupported paint returns `null`
+  rather than a fabricated value, and a test documents the limitation as a fact. Task 0011 is
+  therefore `partial`, not `done` — a negative result recorded rather than papered over.
+  `measure` leaves the page's rendered output byte-identical to a render without it.
+
+## 0.5.2 — 2026-10-28
+
+Knowledge improvements driven by evidence, not intuition. Six graphics rebuilt from brief and
+knowledge alone were judged *"not what I'd call good, but not bad"*; the diagnosis
+(`dev/docs/evidence/0018-parity-five/DIAGNOSIS.md`) found one cause behind six recurring defects:
+**every rule in `knowledge/` is a constraint, and thinness is an absence, so no constraint catches
+it.** A graphic can satisfy every stated rule and still ship informationally thin. Four changes, all
+value-free:
+
+- **`release-check.md` §3b — "Check it is _finished_, not merely correct."** The new step asks for
+  the parts list of a finished graphic in its family and names two symptoms that look like restraint
+  and are not: an **element present but under-loaded** (a cell carrying one fact where the data
+  supports three), and a **region left empty by accident**. Its operative test is to put the graphic
+  beside a sibling and ask what the sibling tells a reader that it does not.
+- **`source-credit.md` §1 — the attribution band is a contract element, not decoration.** Where a
+  project reserves a band, a graphic in that family carries it; moving the credit into the body is
+  the same defect wearing a different shape. Four of six rebuilds dropped or degraded it.
+- **`composition.md` §2 — a title-band canvas is an instruction.** A canvas profile reserving a band
+  for a container's title *means the container owns the title*, and a graphic rendered to it must
+  not draw one. Two rebuilds drew one anyway.
+- **`axes-and-sidebar.md` §1 and new §2b — axis craft.** Place an axis title as a title (rotated, or
+  below the ticks) rather than as a floating note above the plot, which reads as commentary and
+  leaves the axis unlabelled. And put ticks on a familiar step rather than on the data range divided
+  by the tick count, which produces arbitrary multiples a reader cannot estimate from.
+
+Two of the six defects are deliberately **not** fixed here: an unreachable project palette, and
+which parts a finished graphic of a family contains. Both are project properties, not properties of
+explanatory graphics, and ADR 0008 §2 keeps them out of the artifact. The skill supplies the
+question; a declared style's `description` supplies the answer.
+
 ## 0.5.1 — 2026-10-28
 
 - **The config reader accepts the TOML the schema advertises (task 0022).** `_read_toml_tracked`

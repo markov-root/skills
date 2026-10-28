@@ -21,6 +21,11 @@ Note the shape of that rule. It is not "every axis carries a title" — it is th
 What fails the rule is a bare numeric axis with no route at all, and that failure is common because
 the author knows what the numbers mean.
 
+**If you choose the axis title, place it as one** — rotated along a vertical axis, below the ticks on
+a horizontal one. A horizontal line of text floating above the plot saying what the vertical axis
+measures is a *note about* the axis, not a label on it: it reads as commentary, sits in the space
+annotations need, and leaves the axis still unlabelled to a reader scanning it.
+
 **An index or a constructed scale always needs an explicit statement.** A unit a reader recognises —
 days, people, currency — can be carried by tick labels. A number that is relative, normalised, or
 constructed cannot, and the statement has to say not just its name but how to read it: whether zero
@@ -41,6 +46,21 @@ The author's failure mode is reliable: everything is legible at the distance fro
 The check is to view the graphic at the delivery size — reduced to the proportion it will occupy, or
 at the viewing distance it will be read from — and see what disappears. See
 [`release-check.md`](release-check.md).
+
+## 2b. Put ticks on numbers a reader can hold `[core]`
+
+**Rule.** Tick values land on round numbers in the reader's own counting system — a familiar unit
+step they can multiply in their head — not on values derived by dividing the data range into equal
+parts.
+
+A scale whose steps are the data range divided by the tick count is arithmetically even and
+cognitively useless: its labels are arbitrary multiples, and a reader cannot estimate a mark's value
+from them without doing division. Rounding the step to the nearest familiar interval costs nothing
+and is readable at a glance.
+
+Any charting library will produce the arbitrary version if you ask it for "about four ticks" over a
+raw range. Asking instead for a *nice* step is the fix, and it is one function — this is a solved
+problem with a standard name, and reaching for it is cheaper than discovering it.
 
 ## 3. Do not repeat the axis in the title, the ticks, and the label `[core]`
 

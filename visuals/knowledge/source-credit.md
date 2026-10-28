@@ -21,6 +21,13 @@ attribution in the image.
 A graphic that uses no third-party data and makes no external claim — your own schematic of your own
 system — may have nothing to attribute. That is a legitimate state, not an omission.
 
+**Where a project reserves a band for attribution, that band is a contract element, not decoration.**
+It has a fixed height the layout is built against (see [`composition.md`](composition.md) §3), and a
+graphic in that family carries it whether or not the author feels it needs one — a family where some
+members have the band and some do not reads as unfinished work, and the missing ones are the ones a
+reader distrusts. Moving the attribution into the body instead is the same defect wearing a
+different shape.
+
 ## 2. The snapshot date is read from the data, never typed `[core]`
 
 **Rule.** The date, version, or vintage shown in the attribution is read from the dataset's own
