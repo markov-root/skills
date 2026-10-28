@@ -876,6 +876,7 @@ def render_visual(
     readiness_timeout: float = DEFAULT_READINESS_TIMEOUT_S,
     budget_ms: int = DEFAULT_BUDGET_MS,
     renderer_version: str = "",
+    publish: bool = True,
 ) -> RenderOutcome:
     """Render every frame of a visual's manifest into a new immutable version.
 
@@ -985,7 +986,8 @@ def render_visual(
         outcome["receipt"] = receipt
 
     stage_and_commit(visual_dir, version, builder)
-    repoint_latest(visual_dir, version)
+    if publish:
+        repoint_latest(visual_dir, version)
     return RenderOutcome(
         version=version,
         version_dir=visual_dir / version,

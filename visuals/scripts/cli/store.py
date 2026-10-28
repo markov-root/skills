@@ -133,6 +133,35 @@ def repoint_latest(visual_dir: Path, version: str) -> None:
         raise
 
 
+def publish_version(visual_dir: Path, version: str) -> None:
+    """Promote a reviewed immutable version after checking its recorded frames."""
+    if not VERSION_RE.fullmatch(version):
+        raise StoreError(f"malformed version {version!r} (expected vX.Y.Z)")
+    target = visual_dir / version
+    if not target.is_dir() or target.is_symlink():
+        raise StoreError(f"version {version!r} is absent or is a symlink")
+    receipt_path = target / "receipt.json"
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        frames = receipt["frames"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise StoreError(f"cannot read receipt {receipt_path}: {exc}") from exc
+    if not isinstance(frames, list) or not frames:
+        raise StoreError(f"receipt {receipt_path} has no frames")
+    for frame in frames:
+        if not isinstance(frame, dict):
+            raise StoreError(f"receipt {receipt_path} has a malformed frame")
+        name, expected = frame.get("name"), frame.get("sha256")
+        if (not isinstance(name, str) or Path(name).name != name
+                or not name.endswith(".png") or not isinstance(expected, str)
+                or not re.fullmatch(r"[a-f0-9]{64}", expected)):
+            raise StoreError(f"receipt {receipt_path} has a malformed frame record")
+        image = target / name
+        if not image.is_file() or sha256_file(image) != expected:
+            raise StoreError(f"frame {image} is missing or differs from its receipt")
+    repoint_latest(visual_dir, version)
+
+
 # --------------------------------------------------------------------------
 # receipts — provenance with per-frame content hashes
 # --------------------------------------------------------------------------

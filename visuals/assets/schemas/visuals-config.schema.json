@@ -90,6 +90,14 @@
         "crop_margin_px": { "type": "number", "minimum": 0 }
       }
     },
+    "improve": {
+      "description": "Bounded, opt-in iteration against each visual's own brief. No design ranking.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
     "styles": {
       "description": "Optional project-owned named families. Each name has one human description, which may include prose rules. No bundled, inherited, or default style exists.",
       "type": "object",

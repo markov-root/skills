@@ -151,6 +151,7 @@ class ResolvedConfig:
     hooks: tuple[Hook, ...]
     advisory_checks: tuple[str, ...]
     check_thresholds: dict[str, float]
+    improve_max_iterations: int
     web_root: Path  # the directory served as the web root at render time (task 0017)
     styles: dict[str, str]  # declared name -> human description; no defaults or inheritance
     scaffold_wiring: dict[str, ScaffoldWiring]  # project-owned emission, keyed by style
@@ -471,6 +472,18 @@ def _validate_check_thresholds(data: dict[str, Any], file: Path,
     return result
 
 
+def _validate_improve(data: dict[str, Any], file: Path,
+                      lines: dict[tuple[str, ...], int]) -> int:
+    raw = data.get("improve", {})
+    if not isinstance(raw, dict):
+        _fail("improve", "a table with max_iterations", file, lines)
+    _unexpected_keys(raw, _load_schema()["properties"]["improve"], "improve", file, lines)
+    cap = raw.get("max_iterations", 3)
+    if not _is_int(cap) or not 1 <= cap <= 10:
+        _fail("improve.max_iterations", "an integer from 1 to 10", file, lines)
+    return cap
+
+
 def _validate_styles(data: dict[str, Any], file: Path, lines: dict[tuple[str, ...], int]) -> dict[str, str]:
     styles = data.get("styles", {})
     if not isinstance(styles, dict):
@@ -595,6 +608,7 @@ def _validate(
     hooks = _validate_hooks(data, root, file, lines)
     advisory = _validate_advisory(data, file, lines)
     check_thresholds = _validate_check_thresholds(data, file, lines)
+    improve_max_iterations = _validate_improve(data, file, lines)
     styles = _validate_styles(data, file, lines)
     scaffold_wiring = _validate_scaffold_wiring(data, profiles, file, lines)
     web_root = _validate_web_root(data, root, file, lines)
@@ -610,6 +624,7 @@ def _validate(
         hooks=hooks,
         advisory_checks=advisory,
         check_thresholds=check_thresholds,
+        improve_max_iterations=improve_max_iterations,
         web_root=web_root,
         styles=styles,
         scaffold_wiring=scaffold_wiring,

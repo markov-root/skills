@@ -44,6 +44,10 @@ def _build_parser() -> argparse.ArgumentParser:
              "loudly in the receipt (the exit code stays 0 — ADR 0004)",
     )
     parser.add_argument(
+        "--unpublished", action="store_true",
+        help="keep the new immutable version for review without repointing latest",
+    )
+    parser.add_argument(
         "--into", metavar="VERSION",
         help="explicit target version (vX.Y.Z); by default the version is "
              "derived from existing directories, never hand-supplied",
@@ -77,7 +81,7 @@ def main(argv: list[str]) -> int:
     try:
         outcome = render.render_visual(
             slug=args.slug, start=Path.cwd(), level="patch",
-            into=args.into, check=args.check, **kwargs,
+            into=args.into, check=args.check, publish=not args.unpublished, **kwargs,
         )
     except render.RenderError as exc:
         print(f"visuals render: error: {exc}", file=sys.stderr)
@@ -91,7 +95,10 @@ def main(argv: list[str]) -> int:
             f"{frame['sha256'][:12]}  {frame['readiness']}"
         )
     print(f"receipt: {outcome.version_dir / 'receipt.json'}")
-    print(f"latest -> {outcome.version}")
+    if args.unpublished:
+        print("unpublished: latest unchanged")
+    else:
+        print(f"latest -> {outcome.version}")
     for warning in outcome.warnings:
         print(f"warning: {warning}")
     if outcome.deterministic is False:

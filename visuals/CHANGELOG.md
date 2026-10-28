@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 — 2026-10-28
+
+- Authored renders can remain unpublished for review. `probe --version` reads
+  one immutable version without following `latest`; `publish` checks its receipt
+  and frame hashes before atomically promoting it. The normal render path keeps
+  its existing publish behavior for compatibility.
+- New `improve` command: project-configured cap, dry-run by default, one
+  unpublished render and cold-reader probe per executed iteration, sequential
+  criterion evidence in `improvement.json`, and explicit author revision
+  between invocations. Agreement, disagreement, and not-determinable remain
+  separate. It does not edit the master or publish a version.
+- Free-form acceptance bullets now report `not-determinable`; factual probe
+  checks require explicit `Q: … | A: …` pairs. A real reference probe and a
+  public negative control exercised the dispatch path. A public two-iteration
+  trial moved a failed open claim to agreement and kept `latest` unchanged.
+- The authoring workflow calls for full-size and delivery-size inspection,
+  revision against the brief, and explicit promotion after review.
+
 ## 0.7.0 — 2026-10-28
 
 The measured loop lands, and all three commands ship **partial** — each with the criterion it could

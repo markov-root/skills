@@ -174,6 +174,26 @@ IMAGE_SPEC = CommandSpec(
     handler="image_cmd",
 )
 
+IMPROVE_SPEC = CommandSpec(
+    name="improve",
+    usage="improve <slug> [--execute] [--new-run] [--json]",
+    summary="Run one bounded unpublished render-and-probe iteration against the visual's own brief.",
+    help_text=(
+        "One invocation renders one unpublished version and probes its delivery\n"
+        "previews against the brief's explicit Q: … | A: … criteria. The author\n"
+        "revises the source between invocations. Project [improve].max_iterations\n"
+        "sets a cap (default 3); reaching it is a normal advisory outcome.\n"
+        "Default dry-run writes nothing and spends no quota. --execute renders,\n"
+        "sends each delivery preview and minimal questions to two fresh Codex\n"
+        "agents per frame, and stores sequential evidence\n"
+        "in improvement.json. --new-run starts another capped sequence without\n"
+        "discarding earlier evidence. The command never edits the master, ranks\n"
+        "designs, or repoints latest. Use publish after human review.\n"
+    ),
+    backend="uv",
+    handler="improve_cmd",
+)
+
 INDEX_SPEC = CommandSpec(
     name="index",
     usage="index [--json]",
@@ -318,8 +338,8 @@ NEW_SPEC = CommandSpec(
 
 RENDER_SPEC = CommandSpec(
     name="render",
-    usage="render <slug> [--check] [--into vX.Y.Z]",
-    summary="Render a visual into a new immutable version directory with a hashed receipt, previews, and a repointed latest.",
+    usage="render <slug> [--check] [--into vX.Y.Z] [--unpublished]",
+    summary="Render a visual into a new immutable version; optionally keep latest unchanged for review.",
     help_text=(
         "Render every frame of <slug>'s manifest (source/frames.txt) at the\n"
         "resolved canvas profile into a NEW immutable version directory.\n"
@@ -347,6 +367,7 @@ RENDER_SPEC = CommandSpec(
         "                 reported loudly in the receipt but the exit code stays\n"
         "                 0 — determinism is reported, not blocked (ADR 0004)\n"
         "  --into vX.Y.Z  explicit migration target; refused if it exists\n"
+        "  --unpublished  keep latest unchanged until an explicit publish\n"
         "\n"
         "Exit codes: 0 rendered, 1 blocking render failure (missing manifest,\n"
         "a manifest line with no URL, a Chrome error, a zero-byte output, a\n"
@@ -359,10 +380,10 @@ RENDER_SPEC = CommandSpec(
 
 PROBE_SPEC = CommandSpec(
     name="probe",
-    usage="probe <slug> [--execute] [--json]",
+    usage="probe <slug> [--version vX.Y.Z] [--execute] [--json]",
     summary="Test delivery-size comprehension with fresh agents; dry-run by default.",
     help_text=(
-        "Read the latest delivery-size previews and the visual's BRIEF.md. A fresh\n"
+        "Read delivery-size previews from latest or --version and the visual's BRIEF.md. A fresh\n"
         "agent sees only each preview and minimal questions; a separate agent\n"
         "compares its response with the brief. Failed checks persist beside the\n"
         "visual and rerun after ordinary source edits. Changed brief intent or\n"
@@ -375,6 +396,21 @@ PROBE_SPEC = CommandSpec(
     ),
     backend="stdlib",
     handler="probe_cmd",
+)
+
+PUBLISH_SPEC = CommandSpec(
+    name="publish",
+    usage="publish <slug> <vX.Y.Z>",
+    summary="Promote a reviewed immutable version to latest after checking receipt and frame hashes.",
+    help_text=(
+        "Check the chosen version's receipt and every recorded frame hash, then\n"
+        "atomically repoint latest. Use after inspecting all frames at full and\n"
+        "delivery size. Refuses an absent, malformed, or changed version and\n"
+        "leaves latest unchanged on failure. Exit 0 published, 1 invalid\n"
+        "artifact, 2 usage, 3 no adopted project.\n"
+    ),
+    backend="stdlib",
+    handler="publish_cmd",
 )
 
 SOURCES_SPEC = CommandSpec(
@@ -545,11 +581,13 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     DATA_SPEC,
     DOCTOR_SPEC,
     IMAGE_SPEC,
+    IMPROVE_SPEC,
     INDEX_SPEC,
     INIT_SPEC,
     MEASURE_SPEC,
     NEW_SPEC,
     PROBE_SPEC,
+    PUBLISH_SPEC,
     RENDER_SPEC,
     SOURCES_SPEC,
     THEME_SPEC,
@@ -566,6 +604,7 @@ UV_ENTRYPOINTS: dict[str, str] = {
     "render": "render_cmd.py",
     "bump": "bump_cmd.py",
     "image": "image_cmd.py",
+    "improve": "improve_cmd.py",
 }
 
 PROG = "visuals"

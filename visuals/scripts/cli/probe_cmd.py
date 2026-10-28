@@ -11,6 +11,8 @@ from pathlib import Path
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="visuals probe", add_help=False)
     parser.add_argument("slug")
+    parser.add_argument("--version", metavar="vX.Y.Z",
+                        help="probe this immutable version instead of latest")
     parser.add_argument(
         "--execute",
         action="store_true",
@@ -41,7 +43,7 @@ def main(argv: list[str]) -> int:
         return 3
     try:
         visual_dir = probe.resolve_visual(resolved.root, args.slug)
-        report = probe.run(visual_dir, execute=args.execute)
+        report = probe.run(visual_dir, execute=args.execute, version=args.version)
     except probe.ProbeUnavailable as exc:
         print(f"visuals probe: unavailable: {exc}", file=sys.stderr)
         return 3
@@ -61,6 +63,8 @@ def main(argv: list[str]) -> int:
             print(
                 f"  persisted {check['frame']}/{check['id']}: {check['state']} — {check['reason']}"
             )
+        for item in report["not_determinable"]:
+            print(f"  not determinable: {item['criterion']} — {item['reason']}")
         if not args.execute:
             print(
                 "dry-run only: no agent dispatched, no quota spent, nothing written; "

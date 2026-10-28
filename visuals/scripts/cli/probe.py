@@ -61,6 +61,19 @@ def parse_intent(brief: str) -> tuple[str, list[dict[str, str]]]:
     return claim, questions
 
 
+def untestable_acceptance(brief: str) -> list[dict[str, str]]:
+    """Keep prose acceptance bullets visible without inventing expected answers."""
+    sections = brief_sections(brief)
+    criteria = "\n".join(value for key, value in sections.items() if "acceptance" in key)
+    result = []
+    for line in criteria.splitlines():
+        match = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
+        if match and not re.match(r"^Q:\s*.+?\s*\|\s*A:\s*.+?\s*$", match[1], re.I):
+            result.append({"criterion": match[1], "outcome": "not-determinable",
+                           "reason": "declare an explicit Q: … | A: … pair for a factual probe"})
+    return result
+
+
 def resolve_visual(root: Path, slug: str) -> Path:
     matches = [
         path
@@ -74,11 +87,19 @@ def resolve_visual(root: Path, slug: str) -> Path:
     return matches[0]
 
 
-def delivery_previews(visual_dir: Path) -> tuple[str, list[tuple[str, Path]]]:
-    latest = visual_dir / "latest"
-    if not latest.is_symlink() or not latest.resolve().is_dir():
-        raise ProbeUnavailable(f"{latest} is missing or dangling")
-    version = latest.resolve()
+def delivery_previews(visual_dir: Path, version_name: str | None = None) -> tuple[str, list[tuple[str, Path]]]:
+    if version_name is None:
+        latest = visual_dir / "latest"
+        if not latest.is_symlink() or not latest.resolve().is_dir():
+            raise ProbeUnavailable(f"{latest} is missing or dangling")
+        version = latest.resolve()
+    else:
+        from store import VERSION_RE
+        if not VERSION_RE.fullmatch(version_name):
+            raise ProbeUnavailable(f"invalid version {version_name!r} (expected vX.Y.Z)")
+        version = visual_dir / version_name
+        if not version.is_dir() or version.is_symlink():
+            raise ProbeUnavailable(f"version {version_name!r} is absent or is a symlink")
     receipt_path = version / "receipt.json"
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -219,7 +240,8 @@ def save_checks(path: Path, checks: list[dict]) -> None:
         Path(name).unlink(missing_ok=True)
 
 
-def run(visual_dir: Path, *, execute: bool = False, binary: str = "codex") -> dict:
+def run(visual_dir: Path, *, execute: bool = False, binary: str = "codex",
+        version: str | None = None) -> dict:
     brief_path = visual_dir / "BRIEF.md"
     try:
         brief = brief_path.read_text(encoding="utf-8")
@@ -229,7 +251,7 @@ def run(visual_dir: Path, *, execute: bool = False, binary: str = "codex") -> di
     criteria = "\n".join(
         value for key, value in brief_sections(brief).items() if "acceptance" in key
     )
-    version, previews = delivery_previews(visual_dir)
+    version, previews = delivery_previews(visual_dir, version)
     checks_path = visual_dir / "probes.json"
     checks = reconcile(
         load_checks(checks_path),
@@ -244,6 +266,7 @@ def run(visual_dir: Path, *, execute: bool = False, binary: str = "codex") -> di
         "mode": "execute" if execute else "dry-run",
         "claim": claim,
         "questions": questions,
+        "not_determinable": untestable_acceptance(brief),
         "frames": [],
         "persisted": checks,
         "cost": "two fresh Codex agent calls per frame; quota usage varies and exact amount is unavailable"
