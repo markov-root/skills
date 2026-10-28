@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>{{SLUG}}</title>
+    <!--
+      Contract wiring only (ADR 0004): this scaffold declares no colour, no
+      type, no size, no layout, no composition. The canvas below is the
+      author's. The stylesheet link resolves the project theme at the correct
+      relative depth for where this file sits; regenerate shared/theme.css
+      from the token source if the project theme changes.
+    -->
+    <link rel="stylesheet" href="{{THEME_REL}}" />
+    <style>
+      /* wiring: an undecorated full-viewport canvas. No colour, type, or
+         geometry is declared here; the render engine supplies the canvas
+         size from the project's canvas profile. The only structure is the
+         corpus's own: an author-owned canvas area above a source-credit
+         band (the footer band). */
+      html, body { margin: 0; }
+      body { display: flex; flex-direction: column; min-height: 100vh; }
+      main.canvas { flex: 1 1 auto; }
+    </style>
+    <script>
+      // Readiness signal (render contract): fire after the first paint.
+      // The render engine captures on this signal; without it the render
+      // falls back to a bounded virtual-time budget, recorded in the receipt.
+      requestAnimationFrame(() => {
+        document.documentElement.dataset.ready = "true";
+      });
+    </script>
+</head>
+<body>
+    <!-- deliberately empty: the composition is the author's, never the scaffold's -->
+    <main class="canvas"></main>
+    <!-- source-credit band: attribution slots; the single identifying string -->
+    <footer class="source-credit">{{SLUG}}</footer>
+</body>
+</html>

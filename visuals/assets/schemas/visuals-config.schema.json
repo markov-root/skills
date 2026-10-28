@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skills.local/visuals/schemas/visuals-config.schema.json",
+  "title": "visuals.toml — project adoption config",
+  "description": "Declared, versioned project configuration for the visuals production envelope: canvas geometry profiles, theme reference, contract-layer paths, pre-render hooks, and the project's selection of advisory checks. Geometry and contract only — per ADR 0004 no key may express a type scale, a colour, or a layout; design tokens belong to the theme (ADR 0005), never here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "canvas", "theme", "paths"],
+  "properties": {
+    "schema_version": {
+      "description": "Config schema version. The loader rejects an unknown version explicitly — it is never guessed. Human authors write it quoted or bare; both are accepted (an integer or a decimal-string form of one integer).",
+      "oneOf": [
+        { "type": "integer", "minimum": 1 },
+        { "type": "string", "pattern": "^[0-9]+$" }
+      ]
+    },
+    "canvas": {
+      "description": "Declared canvas geometry. A profile declares dimensions and insets, not design.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "profiles"],
+      "properties": {
+        "default": {
+          "description": "Name of the profile used when a command does not select one. Must be a key of profiles.",
+          "type": "string",
+          "minLength": 1
+        },
+        "profiles": {
+          "description": "Named canvas profiles, e.g. the corpus's slide (1920x1080, full-slide assets) and title-band (1920x972, the 108px deck-owned title band).",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/canvasProfile" }
+        }
+      }
+    },
+    "theme": {
+      "description": "Theme reference (ADR 0005 resolution). A bare string is a name or a path (containing '/' or ending '.toml', relative to the project root); an inline table is an inline token table — resolution step 1. Structure is owned by task 0004 and is not validated here beyond its being a table.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "object" }
+      ]
+    },
+    "web_root": {
+      "description": "The directory served as the web root at render time (task 0017), as a path relative to the project root — it MAY sit above the project root, e.g. a repository root whose /_shared assets masters reference absolutely. Must exist and be a directory; defaults to the project root when absent.",
+      "type": "string",
+      "minLength": 1
+    },
+    "paths": {
+      "description": "The three contract-layer files, relative to the project root (the directory holding visuals.toml). Each must resolve inside the root.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_registry", "claims_ledger", "consumer_manifest"],
+      "properties": {
+        "source_registry": {
+          "description": "Attribution registry with per-asset provenance (e.g. governments/spain/visuals/_shared/sources.json).",
+          "type": "string",
+          "minLength": 1
+        },
+        "claims_ledger": {
+          "description": "The claims ledger every load-bearing figure resolves into (e.g. governments/spain/research/CLAIMS.md).",
+          "type": "string",
+          "minLength": 1
+        },
+        "consumer_manifest": {
+          "description": "The single join between script and assets (e.g. governments/spain/deck/SLIDES.md).",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "hooks": {
+      "description": "Pre-render hooks, run in declared order before rendering. Declared only — init and config resolution never execute them. A non-zero hook exit aborts the render with the hook's own output surfaced (task 0005).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/hook" }
+    },
+    "advisory_checks": {
+      "description": "The project's selection of advisory checks to run (task 0007). Advisory findings never affect an exit code (ADR 0004); an empty array selects nothing — the report must then say so.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "styles": {
+      "description": "Optional project-owned named families. Each name has one human description, which may include prose rules. No bundled, inherited, or default style exists.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/style" }
+    },
+    "scaffold": {
+      "description": "Optional project-owned wiring for new visuals, keyed by a declared style. No default or inheritance exists.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/scaffoldWiring" }
+    }
+  },
+  "$defs": {
+    "scaffoldWiring": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "includes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scaffoldInclude" }
+        },
+        "readiness": { "enum": ["ready", "rendered", "none"] },
+        "footer": { "$ref": "#/$defs/scaffoldFooter" },
+        "canvas": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scaffoldInclude": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "enum": ["stylesheet", "script"] },
+        "path": { "type": "string", "minLength": 1 },
+        "module": { "type": "boolean" }
+      }
+    },
+    "scaffoldFooter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag"],
+      "properties": {
+        "tag": { "type": "string", "minLength": 1 },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "style": {
+      "description": "One project-owned style. Its table name is its identity; description may state family-specific prose rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "canvasProfile": {
+      "description": "One canvas profile: geometry only, no design.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "safe_area", "footer_band", "delivery_scale"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "safe_area": {
+          "description": "Content insets in pixels.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["top", "right", "bottom", "left"],
+          "properties": {
+            "top": { "type": "integer", "minimum": 0 },
+            "right": { "type": "integer", "minimum": 0 },
+            "bottom": { "type": "integer", "minimum": 0 },
+            "left": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "footer_band": {
+          "description": "Reserved footer band height in pixels (the corpus's 62px source-credit band).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "delivery_scale": {
+          "description": "Scale factor for the delivery-size preview (e.g. 0.3333333333333333 = 640/1920, the Teams-call legibility check). 0 < scale <= 1.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "hook": {
+      "description": "One pre-render hook: an argv executed directly (no shell), optionally with its own working directory.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "run"],
+      "properties": {
+        "name": {
+          "description": "Unique hook name, for receipt and error reporting.",
+          "type": "string",
+          "minLength": 1
+        },
+        "run": {
+          "description": "The command as an argv array, executed directly without a shell.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "cwd": {
+          "description": "Working directory for the hook, relative to the project root. Defaults to the root.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

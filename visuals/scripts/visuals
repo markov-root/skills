@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Single entry point for the `visuals` skill.
+#
+# Deliberately thin: this dispatcher carries NO command list, NO usage text, and
+# NO weight-routing case. Everything command-shaped — parsing, dispatch, help,
+# command listing, and stdlib-vs-uv dependency-weight routing — is derived at
+# runtime from the one static command registry (scripts/cli/registry.py), which
+# is the only command catalog in the artifact. Bash only locates the CLI and
+# execs it.
+set -euo pipefail
+
+here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: visuals needs python3 (stdlib only for the dispatcher); python3 not on PATH." >&2
+  exit 3
+fi
+
+exec python3 "$here/cli/main.py" "$@"

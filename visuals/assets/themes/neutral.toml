@@ -1,0 +1,75 @@
+# Bundled brand-neutral theme for `visuals` — the ONLY hex source in this
+# artifact (ADR 0005: the artifact ships exactly one brand-neutral default;
+# no client or third-party brand, no vendored brand fonts).
+#
+# Construction (documented, reproducible): every colour was generated in the
+# Oklab colour space (Björn Ottosson 2020, public/references/SOURCES.md) and
+# converted to sRGB; greys are near-neutral at fixed lightness, the chart
+# palette is six hues at equal lightness (Oklch L 0.62, C 0.10) spaced 60
+# degrees apart, and the sequential ramp is three stops of the accent hue.
+# Plain enough not to be mistaken for a house style (ADR 0005).
+#
+# Validate with `visuals theme check neutral` — findings are advisory and
+# never block (ADR 0004). Threshold provenance: public/references/SOURCES.md.
+
+schema_version = 1
+name = "neutral"
+
+[colour.roles.background.page]
+hex = "#f5f3f0"   # Oklch(0.965, 0.004, 80)
+kind = "non-text"
+
+[colour.roles.background.surface]
+hex = "#ffffff"   # Oklch(1.0, 0.0, 0)
+kind = "non-text"
+
+[colour.roles.text.body]
+hex = "#27292b"   # Oklch(0.28, 0.005, 260)
+kind = "text"
+on = ["background.page", "background.surface"]
+
+[colour.roles.text.muted]
+hex = "#616366"   # Oklch(0.50, 0.005, 260)
+kind = "text"
+on = ["background.page", "background.surface"]
+
+[colour.roles.accent.base]
+hex = "#4868a2"   # Oklch(0.52, 0.10, 262) — a plain, desaturated indigo
+kind = "non-text"
+on = ["background.page", "background.surface"]
+
+[type]
+base = 16  # px, the reference size the scale multiplies
+
+[type.families.sans]
+stack = "system-ui, 'Helvetica Neue', Arial, sans-serif"
+
+[type.families.mono]
+stack = "ui-monospace, Menlo, Consolas, monospace"
+
+[type.scale]
+caption = 0.75
+label = 0.8125
+body = 1.0
+title = 1.6
+display = 2.4
+
+[chart.palette.categorical]
+# Oklch(L 0.62, C 0.10), hues 0/60/120/180/240/300 — equal lightness and
+# chroma, evenly spaced hue; adjacent pairs measure delta-E(CIEDE2000)
+# 22.1-27.6, comfortably above the declared minimum below.
+colours = ["#b76c84", "#b27744", "#7e8f46", "#2c9a88", "#478ebc", "#8f78ba"]
+
+[chart.palette.sequential]
+stops = ["#dae5f9", "#6686c0", "#0d2a61"]  # accent hue ramp, Oklch L 0.92/0.62/0.30
+
+[encoding.check]
+# Minimum adjacent-pair colour distance for the categorical palette, in
+# CIEDE2000 units (kL = kC = kH = 1). DECLARED DESIGN CHOICE, NOT A CITED
+# THRESHOLD: no primary public source prescribes a minimum adjacent-pair
+# distance for chart palettes (see public/references/SOURCES.md — the honest
+# statement required by the task). This value sits just below the bundled
+# palette's own measured minimum (22.1) so the bundled theme passes with
+# margin, and every project may declare a stricter or laxer value in its own
+# theme; `theme check` reports the measured delta-E either way.
+palette_min_de00 = 20.0
