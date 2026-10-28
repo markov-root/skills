@@ -78,6 +78,18 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "check_thresholds": {
+      "description": "Project-declared numeric thresholds for the optional measurement checks. Omitted values leave the corresponding check not measurable; no bundled threshold is inferred.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_effective_px": { "type": "number", "exclusiveMinimum": 0 },
+        "contrast_min_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "label_collision_max_area_px2": { "type": "number", "minimum": 0 },
+        "stage_max_drift_px": { "type": "number", "minimum": 0 },
+        "crop_margin_px": { "type": "number", "minimum": 0 }
+      }
+    },
     "styles": {
       "description": "Optional project-owned named families. Each name has one human description, which may include prose rules. No bundled, inherited, or default style exists.",
       "type": "object",

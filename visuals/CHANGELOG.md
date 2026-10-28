@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.7.0 — 2026-10-28
+
+The measured loop lands, and all three commands ship **partial** — each with the criterion it could
+not honestly close named in its own task record. That is the intended outcome of ADR 0003, which
+asked for a negative result to be treated as information.
+
+- **New `check` command (task 0012).** Gates over the measurement `measure` produces, with the
+  resolution ladder. Every gate is **advisory**: it carries a severity and a selector, is selected
+  by project config, and never affects an exit code — ADR 0004's blocking set stays at exactly four,
+  and a run that finds fifty problems still exits 0. Thresholds come from the project's config or
+  theme, never from a constant in the skill (ADR 0008 §2). **`null` from `measure` surfaces as
+  `not-measurable`, a distinct third outcome**, never folded into pass or fail — the gradient case
+  `measure` cannot compose would otherwise produce confidently-wrong contrast findings on exactly
+  the graphics that most need checking. **Partial:** live execution against the reference corpus and
+  broader acceptance derivation are unproven.
+- **New `probe` command (task 0013).** Dispatches the delivery-size render plus a minimal prompt to
+  a fresh agent with no build context, compares the response against the brief's intended claim, and
+  persists failures as per-visual checks that re-run. **Dry-run by default** — the dispatching path
+  is behind an explicit flag and no test here spends quota. A probe tests **comprehension, not
+  quality**, and is never a verdict on whether a graphic is good. A probe that cannot run says so
+  rather than passing by default. **Partial:** the comprehension criterion has not been exercised
+  against a real paid invocation.
+- **New ADR 0009 (proposed, not ratified)** and **task 0024**: a bounded self-improvement loop.
+  Evidence across seven agent-built graphics showed the number of render-and-look cycles predicted
+  the quality, and nothing in the skill causes that loop to happen. The decision draws the line that
+  makes such a loop admissible: **iterating one graphic toward its own brief is not taste;
+  generating candidate designs and picking a winner is.** The first is permitted, bounded and
+  opt-in; the second stays forbidden by ADR 0003 and ADR 0004 together.
+
 ## 0.6.0 — 2026-10-28
 
 - **New `measure` command (task 0011), and an honest limit.** A read-only instrument evaluated

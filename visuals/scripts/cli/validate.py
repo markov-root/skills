@@ -790,7 +790,8 @@ def run_validation(
     """
     root: Path = config_resolved.root
     selected = list(config_resolved.advisory_checks)
-    unknown = [name for name in selected if name not in ADVISORY_CHECKS]
+    unknown = [name for name in selected if name not in ADVISORY_CHECKS
+               and name not in config_module.MEASUREMENT_ADVISORIES]
     selected_set = {name for name in selected if name in ADVISORY_CHECKS}
 
     report = Report(
@@ -901,6 +902,10 @@ def run_validation(
             report.not_run.append(
                 NotRun(name, "not selected by project config (advisory_checks)")
             )
+    for name in config_module.MEASUREMENT_ADVISORIES:
+        if name in selected:
+            report.not_run.append(NotRun(
+                name, "selected for visuals check, not evaluated by validate"))
 
     # Unknown advisory check names are a defect in the CONFIG, reported
     # advisory so a typo cannot add a blocker (ADR 0004: the four are fixed).

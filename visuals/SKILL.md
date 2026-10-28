@@ -2,12 +2,15 @@
 name: visuals
 description: >-
   Produce explanatory graphics — slides, posters, figures, diagrams, charts —
-  under a production contract, with routed knowledge on composition, staged
-  builds, encoding, annotation, axes, sources, and release checks. `render`
+  under a production contract, with guidance on composition, encoding, and
+  release checks. `render`
   captures a frame manifest in headless Chrome after an explicit readiness
   signal, into immutable versions with SHA-256 receipts; `bump` derives the
   next version. `measure` reports selector-keyed scene geometry, actual glyph
-  fonts, bounded CSS paint composition, and explicit unknowns. `validate`
+  fonts, CSS paint composition, and explicit unknowns. `check`
+  evaluates project-selected advisory measurements and emits a contact sheet
+  plus crops of flagged regions. `probe` offers opt-in cold-reader
+  comprehension checks at delivery size. `validate`
   separates exactly four blocking conditions from advisory findings. `new`
   scaffolds a bare canvas; `index` derives portfolio status; `sources` and
   `data snapshot` hash-lock provenance; `image` delegates generation; `init`
@@ -21,7 +24,7 @@ compatibility: >-
   the authored-render engine. The `image-generation` skill is an optional
   delegate, capability-detected and never a hard dependency.
 metadata:
-  version: "0.6.0"
+  version: "0.7.0"
 ---
 
 # visuals
@@ -33,12 +36,12 @@ holds them together. It deliberately owns **no opinion about what a graphic
 draws**; scaffolds emit contract wiring only, and no command ranks, scores, or
 grades a design.
 
-## Status at this version (0.6.0)
+## Status at this version (0.7.0)
 
 Implemented: `bump`, `data`, `doctor`, `image`, `index`, `init`, `new`,
-`render`, `measure`, `sources`, `theme`, `validate`, plus project-declared named styles and
-the `knowledge/` layer. Not yet built: the remaining measurement loop (`check`,
-`probe`). The registry (`scripts/cli/registry.py`) exposes exactly what exists —
+`render`, `measure`, `check`, `probe`, `sources`, `theme`, `validate`, plus project-declared named styles and
+the `knowledge/` layer. `probe` has a read-only dry-run and a quota-consuming `--execute` path;
+the latter is stub-tested but has not been exercised on the private reference corpus. The registry (`scripts/cli/registry.py`) exposes exactly what exists —
 roadmap commands are absent rather than stubbed, so the CLI never advertises
 capability it does not have.
 
@@ -50,6 +53,8 @@ scripts/visuals new <kind> <slug>    # bare contract wiring; optional --style <n
 scripts/visuals render <slug>        # readiness-signalled render into an immutable version
 scripts/visuals bump <slug> minor    # re-render at a derived next version
 scripts/visuals validate             # four blocking conditions, advisory findings separately
+scripts/visuals check <slug>         # project-selected advisory scene checks and looking ladder
+scripts/visuals probe <slug>         # dry-run; --execute dispatches fresh agents and spends quota
 scripts/visuals index                # derived portfolio status; never hand-maintained
 scripts/visuals sources verify       # re-hash every declared asset; https provenance
 scripts/visuals data snapshot <slug> --input ... --limitation ...

@@ -30,6 +30,7 @@ found-but-invalid config.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -61,6 +62,13 @@ SCHEMA_PATH = (
 REGISTRY_KEYS = ("source_registry", "claims_ledger", "consumer_manifest")
 
 SAFE_AREA_KEYS = ("top", "right", "bottom", "left")
+
+# Names selected by visuals.toml but evaluated only by `visuals check`.
+MEASUREMENT_ADVISORIES = (
+    "geometry-overflow", "effective-type-size", "text-contrast",
+    "colour-only-encoding", "label-collision", "stage-geometry",
+    "resolved-font-fallback",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +150,7 @@ class ResolvedConfig:
     registry_paths: dict[str, Path]  # "source_registry" | "claims_ledger" | "consumer_manifest"
     hooks: tuple[Hook, ...]
     advisory_checks: tuple[str, ...]
+    check_thresholds: dict[str, float]
     web_root: Path  # the directory served as the web root at render time (task 0017)
     styles: dict[str, str]  # declared name -> human description; no defaults or inheritance
     scaffold_wiring: dict[str, ScaffoldWiring]  # project-owned emission, keyed by style
@@ -444,6 +453,24 @@ def _validate_advisory(data: dict[str, Any], file: Path, lines: dict[tuple[str, 
     return tuple(checks)
 
 
+def _validate_check_thresholds(data: dict[str, Any], file: Path,
+                               lines: dict[tuple[str, ...], int]) -> dict[str, float]:
+    raw = data.get("check_thresholds", {})
+    schema = _load_schema()["properties"]["check_thresholds"]
+    if not isinstance(raw, dict):
+        _fail("check_thresholds", "a table of numeric measurement thresholds", file, lines)
+    _unexpected_keys(raw, schema, "check_thresholds", file, lines)
+    result: dict[str, float] = {}
+    for key, value in raw.items():
+        floor = 0 if key in ("label_collision_max_area_px2", "stage_max_drift_px", "crop_margin_px") else 1
+        if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                or not math.isfinite(value) or value < 0 or (floor and value == 0)):
+            _fail(f"check_thresholds.{key}", "a finite number above zero" if floor else
+                  "a finite nonnegative number", file, lines)
+        result[key] = float(value)
+    return result
+
+
 def _validate_styles(data: dict[str, Any], file: Path, lines: dict[tuple[str, ...], int]) -> dict[str, str]:
     styles = data.get("styles", {})
     if not isinstance(styles, dict):
@@ -567,6 +594,7 @@ def _validate(
     registry_paths = _validate_paths(data, root, file, lines)
     hooks = _validate_hooks(data, root, file, lines)
     advisory = _validate_advisory(data, file, lines)
+    check_thresholds = _validate_check_thresholds(data, file, lines)
     styles = _validate_styles(data, file, lines)
     scaffold_wiring = _validate_scaffold_wiring(data, profiles, file, lines)
     web_root = _validate_web_root(data, root, file, lines)
@@ -581,6 +609,7 @@ def _validate(
         registry_paths=registry_paths,
         hooks=hooks,
         advisory_checks=advisory,
+        check_thresholds=check_thresholds,
         web_root=web_root,
         styles=styles,
         scaffold_wiring=scaffold_wiring,
@@ -848,6 +877,7 @@ def scaffold_body() -> dict[str, Any]:
         )},
         "hooks": [],
         "advisory_checks": [],
+        "check_thresholds": {},
     }
 
 
@@ -876,6 +906,12 @@ def to_toml(body: dict[str, Any]) -> str:
         out.append("")
     if body.get("web_root"):
         out.append(f'web_root = "{body["web_root"]}" # found via {body["web_root_reference"]}')
+        out.append("")
+
+    if body.get("check_thresholds"):
+        out.append("[check_thresholds]")
+        for key, value in body["check_thresholds"].items():
+            out.append(f"{key} = {value}")
         out.append("")
 
     canvas = body["canvas"]

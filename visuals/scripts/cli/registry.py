@@ -357,6 +357,26 @@ RENDER_SPEC = CommandSpec(
     handler="render_cmd",
 )
 
+PROBE_SPEC = CommandSpec(
+    name="probe",
+    usage="probe <slug> [--execute] [--json]",
+    summary="Test delivery-size comprehension with fresh agents; dry-run by default.",
+    help_text=(
+        "Read the latest delivery-size previews and the visual's BRIEF.md. A fresh\n"
+        "agent sees only each preview and minimal questions; a separate agent\n"
+        "compares its response with the brief. Failed checks persist beside the\n"
+        "visual and rerun after ordinary source edits. Changed brief intent or\n"
+        "missing frames make a persisted check stale. This is an advisory\n"
+        "comprehension instrument, never a design verdict or blocking gate.\n"
+        "\n"
+        "Default dry-run: no dispatch, quota cost, or write. --execute opts in\n"
+        "to two Codex calls per frame and persists failed checks. --json emits\n"
+        "the report. Exit 0 includes failed probes; exit 3 means unavailable."
+    ),
+    backend="stdlib",
+    handler="probe_cmd",
+)
+
 SOURCES_SPEC = CommandSpec(
     name="sources",
     usage="sources list|verify|add <id> [...] [--registry PATH] [--json]",
@@ -449,6 +469,24 @@ MEASURE_SPEC = CommandSpec(
     handler="measure_cmd",
 )
 
+CHECK_SPEC = CommandSpec(
+    name="check",
+    usage="check <slug> [--output DIR] [--json]",
+    summary="Evaluate project-selected advisory scene checks and emit a 640px contact sheet plus flagged crops.",
+    help_text=(
+        "Measure every manifest frame, evaluate only project-selected advisory\n"
+        "gates, and emit a delivery-size contact sheet followed by full-size\n"
+        "crops for flagged regions. Numeric thresholds and crop context come\n"
+        "from visuals.toml check_thresholds; unknown paint is explicitly\n"
+        "not-measurable. No finding affects the exit code. This command does\n"
+        "not assess hierarchy, communication, or aesthetic quality.\n"
+        "Exit codes: 0 completed regardless of findings, 1 execution error,\n"
+        "2 usage, 3 unavailable browser."
+    ),
+    backend="uv",
+    handler="check_cmd",
+)
+
 VALIDATE_SPEC = CommandSpec(
     name="validate",
     usage="validate [<slug>] [--json]",
@@ -503,6 +541,7 @@ VALIDATE_SPEC = CommandSpec(
 
 COMMAND_SPECS: tuple[CommandSpec, ...] = (
     BUMP_SPEC,
+    CHECK_SPEC,
     DATA_SPEC,
     DOCTOR_SPEC,
     IMAGE_SPEC,
@@ -510,6 +549,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     INIT_SPEC,
     MEASURE_SPEC,
     NEW_SPEC,
+    PROBE_SPEC,
     RENDER_SPEC,
     SOURCES_SPEC,
     THEME_SPEC,
@@ -522,6 +562,7 @@ COMMAND_BY_NAME: dict[str, CommandSpec] = {spec.name: spec for spec in COMMAND_S
 # Dependency-weight routing for uv-backend commands. Values are module filenames
 # under scripts/cli/ with a PEP 723 header; the lockfile sits beside each script.
 UV_ENTRYPOINTS: dict[str, str] = {
+    "check": "check_cmd.py",
     "render": "render_cmd.py",
     "bump": "bump_cmd.py",
     "image": "image_cmd.py",
