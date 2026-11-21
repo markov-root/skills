@@ -1,6 +1,12 @@
 # Changelog
 
 
+## 0.9.2 — 2026-11-21
+
+- SKILL.md points presentation users to the `presentation` skill's `knowledge/visuals.md`, which
+  explains how the two skills divide the work and how a published visual is pinned into a deck.
+- Schema examples use a generic talk path instead of a specific talk.
+
 ## 0.9.1 — 2026-11-10
 
 - `scripts/visuals` is now a `skill-feedback` adapter (portfolio ADR 0006): each invocation records

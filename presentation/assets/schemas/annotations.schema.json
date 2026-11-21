@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presentation.skill/schemas/annotations.schema.json",
+  "title": "src/annotations.yaml (stand-off annotations, ADR 0010)",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "slide",
+      "quote",
+      "kind"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "slide": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+      },
+      "quote": {
+        "type": "string",
+        "minLength": 1
+      },
+      "prefix": {
+        "type": "string"
+      },
+      "suffix": {
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "claim",
+          "note",
+          "cue"
+        ]
+      },
+      "claim": {
+        "type": "string"
+      },
+      "licence": {
+        "type": "string",
+        "minLength": 1
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "kind": {
+              "const": "claim"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "claim"
+          ]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "note",
+                "cue"
+              ]
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "text"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "claim"
+                ]
+              },
+              {
+                "required": [
+                  "licence"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

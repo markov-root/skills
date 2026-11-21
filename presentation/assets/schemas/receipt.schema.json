@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presentation.skill/schemas/receipt.schema.json",
+  "title": "vX.Y.Z/receipt.json (script and deck versions)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "artifact",
+    "version",
+    "level",
+    "note",
+    "created",
+    "inputs",
+    "outputs",
+    "tools",
+    "git"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "enum": [
+        "script",
+        "deck",
+        "library-slide"
+      ]
+    },
+    "artifact": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$",
+      "description": "repository-relative path: no leading '/', no '..' segment"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "previous": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "level": {
+      "enum": [
+        "major",
+        "minor",
+        "patch",
+        "initial"
+      ]
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "origin": {
+      "enum": [
+        "built",
+        "external"
+      ],
+      "default": "built"
+    },
+    "inputs": {
+      "type": "object",
+      "required": [
+        "files"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "propertyNames": {
+            "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$"
+          }
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "selector",
+              "resolved",
+              "path",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "selector": {
+                "type": "string"
+              },
+              "resolved": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$",
+                "description": "repository-relative path: no leading '/', no '..' segment"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "datasets": {
+          "type": "array",
+          "description": "deck data snapshotted from dataset: references (task 0022; portfolio ADR 0006 decision 3)",
+          "items": {
+            "type": "object",
+            "required": [
+              "reference",
+              "dataset",
+              "release",
+              "table",
+              "path",
+              "rows",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "type": "string",
+                "pattern": "^dataset:"
+              },
+              "dataset": {
+                "type": "string",
+                "minLength": 1
+              },
+              "release": {
+                "type": "string",
+                "minLength": 1
+              },
+              "table": {
+                "type": "string",
+                "minLength": 1
+              },
+              "row": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$",
+                "description": "repository-relative path: no leading '/', no '..' segment"
+              },
+              "rows": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "sha256"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "propertyNames": {
+        "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$"
+      }
+    },
+    "tools": {
+      "type": "object",
+      "required": [
+        "present",
+        "standard"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "present": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "standard": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "engine": {
+          "type": "string"
+        },
+        "components": {
+          "type": "string"
+        },
+        "tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "git": {
+      "type": "object",
+      "required": [
+        "commit",
+        "dirty"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

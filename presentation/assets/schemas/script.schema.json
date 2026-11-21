@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presentation.skill/schemas/script.schema.json",
+  "title": "modules/<m>/script/script.yaml",
+  "type": "object",
+  "required": [
+    "schema_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string"
+    },
+    "sections": {
+      "description": "optional ordered list of src/ files; default is src/script.md alone",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$",
+        "description": "repository-relative path: no leading '/', no '..' segment"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id_pattern": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

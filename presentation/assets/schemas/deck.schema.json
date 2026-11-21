@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presentation.skill/schemas/deck.schema.json",
+  "title": "modules/<m>/deck/deck.yaml",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "script"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "script": {
+      "oneOf": [
+        {
+          "description": "`latest` or an exact semantic version",
+          "type": "string",
+          "pattern": "^(latest|(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*))$"
+        },
+        {
+          "const": "none"
+        }
+      ]
+    },
+    "visuals": {
+      "type": "object",
+      "description": "slug (talk visuals) or repository-relative path → selector",
+      "additionalProperties": {
+        "description": "`latest` or an exact semantic version",
+        "type": "string",
+        "pattern": "^(latest|(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*))$"
+      }
+    },
+    "library": {
+      "type": "object",
+      "additionalProperties": {
+        "description": "`latest` or an exact semantic version",
+        "type": "string",
+        "pattern": "^(latest|(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*))$"
+      }
+    },
+    "build": {
+      "type": "string",
+      "enum": [
+        "slides.yaml",
+        "build.py"
+      ],
+      "default": "slides.yaml"
+    },
+    "canvas": {
+      "type": "string"
+    }
+  }
+}

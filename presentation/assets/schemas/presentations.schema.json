@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presentation.skill/schemas/presentations.schema.json",
+  "title": "presentations.toml (repository manifest)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "standard"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "standard": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id_pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "statuses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "blocking_tiers": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokens": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$",
+          "description": "repository-relative path: no leading '/', no '..' segment"
+        }
+      }
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "library": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$",
+          "description": "repository-relative path: no leading '/', no '..' segment"
+        }
+      }
+    },
+    "legacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "talks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

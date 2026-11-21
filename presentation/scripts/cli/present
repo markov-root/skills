@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Single entry point for the `present` CLI (presentation skill). Thin by design: it carries no
+# command list; the registry in cli/present_cli/commands is the only command catalog.
+set -euo pipefail
+here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if ! command -v uv >/dev/null 2>&1; then
+  echo "error: present needs uv (https://docs.astral.sh/uv/) to resolve its Python dependencies." >&2
+  exit 1
+fi
+exec uv run --quiet --script "$here/main.py" "$@"

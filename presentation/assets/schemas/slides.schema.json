@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presentation.skill/schemas/slides.schema.json",
+  "title": "src/slides.yaml (declarative deck, ADR 0009)",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "required": [
+      "id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+      },
+      "component": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "with": {
+        "type": "object"
+      },
+      "builds": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "minItems": 1,
+        "uniqueItems": true
+      },
+      "use": {
+        "type": "string",
+        "pattern": "^library/slides/[a-z0-9]+(-[a-z0-9]+)*@(latest|(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*))$"
+      }
+    },
+    "oneOf": [
+      {
+        "required": [
+          "component"
+        ],
+        "not": {
+          "required": [
+            "use"
+          ]
+        }
+      },
+      {
+        "required": [
+          "use"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "component"
+              ]
+            },
+            {
+              "required": [
+                "with"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

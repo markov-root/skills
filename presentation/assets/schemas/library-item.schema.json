@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://presentation.skill/schemas/library-item.schema.json",
+  "title": "library/slides/<id>/library-slide.yaml or library/visuals/<slug>/library-visual.yaml (ADR 0011)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "description": "equals the item's folder name",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retired": {
+      "description": "a retired item stays readable for old receipts; validate blocks talks that still pin it",
+      "type": "boolean",
+      "default": false
+    },
+    "retired_note": {
+      "description": "why it was retired and what replaces it",
+      "type": "string",
+      "minLength": 1
+    },
+    "derived_from": {
+      "description": "the talk-local item (or library item) this one came from: repository-relative path, @version when known",
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s@]+(@(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*))?$"
+    },
+    "promoted": {
+      "type": "object",
+      "required": [
+        "from",
+        "at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^\\s].*$"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

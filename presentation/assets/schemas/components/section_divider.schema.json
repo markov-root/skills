@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "slides.yaml `with` for component section_divider (deck)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "modules": {
+      "anyOf": [
+        {
+          "type": "array"
+        },
+        {
+          "type": "string",
+          "pattern": "^@data:"
+        }
+      ]
+    },
+    "module_on": {
+      "type": "integer"
+    },
+    "parts": {
+      "anyOf": [
+        {
+          "type": "array"
+        },
+        {
+          "type": "string",
+          "pattern": "^@data:"
+        }
+      ]
+    },
+    "part_on": {
+      "type": "integer"
+    },
+    "descriptions": {},
+    "title": {
+      "type": "string",
+      "description": "slide title (sentence case)"
+    },
+    "sources": {
+      "type": "array",
+      "description": "footer sources: strings, or {publisher, title, when, url} or {publisher, dataset, data_to, url}",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "publisher": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "when": {
+                "type": "string"
+              },
+              "dataset": {
+                "type": "string"
+              },
+              "data_to": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "short": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "takeaway": {
+      "description": "the slide's key point: a sentence, or [lead, rest]",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    }
+  },
+  "required": [
+    "module_on",
+    "modules",
+    "title"
+  ]
+}

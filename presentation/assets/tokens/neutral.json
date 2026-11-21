@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "neutral",
+  "version": "1.0.0",
+  "color": {
+    "ink": {"value": "#1F2937", "description": "primary ink: titles, key series, monochrome logos"},
+    "ink_2": {"value": "#374151", "description": "second ink, for a paired series"},
+    "dark_ground": {"value": "#111827", "description": "dark full-bleed grounds"},
+    "accent": {"value": "#B45309", "description": "the one accent"},
+    "accent_tint": {"value": "#FDF0E1", "description": "accent tint fill"},
+    "accent_2": {"value": "#15803D", "description": "a reserved third category"},
+    "context": {"value": "#D1D5DB", "description": "context points, baseline bars"},
+    "context_line": {"value": "#9CA3AF", "description": "context lines, connectors"},
+    "tint": {"value": "#F3F4F6", "description": "ink tint fill (tracks, bands)"},
+    "grid": {"value": "#E5E7EB", "description": "dotted chart grid"},
+    "background": {"value": "#FAFAFA", "description": "slide background behind labels"},
+    "surface": {"value": "#FFFFFF"},
+    "muted": {"value": "#6B7280"},
+    "label": {"value": "#4B5563"},
+    "rule": {"value": "#E5E7EB"},
+    "edge": {"value": "#D1D5DB"},
+    "off_number": {"value": "#D1D5DB"},
+    "off_text": {"value": "#9CA3AF"}
+  },
+  "font": {
+    "display": {"family": "Liberation Sans"},
+    "body": {"family": "Liberation Sans"},
+    "team_display": {"family": "Liberation Sans Narrow"}
+  },
+  "size": {
+    "panel_lead_pt": 15,
+    "legend_row_pitch": 1.9,
+    "texture_pattern_ink_pct": 62,
+    "texture_ground_pct": 14,
+    "texture_faded_pct": 18
+  },
+  "logo": {}
+}

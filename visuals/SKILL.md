@@ -22,7 +22,7 @@ compatibility: >-
   the authored-render engine. The `image-generation` skill is an optional
   delegate, capability-detected and never a hard dependency.
 metadata:
-  version: "0.9.1"
+  version: "0.9.2"
 ---
 
 # visuals
@@ -126,7 +126,8 @@ of glob patterns; a `deck.yaml`'s `visuals:` pins (`latest` or `X.Y.Z`) are
 checked by the consumer join — an exact version that is absent or not the
 published `latest` is an advisory, and a repository-relative key to another
 talk's visual is listed as external. Projects without `paths.visuals` keep
-`<root>/visuals/<slug>`.
+`<root>/visuals/<slug>`. The `presentation` skill drives this through `present visual new|render|publish|show` and pins
+published versions in each deck; its `knowledge/visuals.md` explains the division of labour.
 
 `sources` re-hashes every declared asset against its recorded digest, requires
 https provenance rather than prose, keeps the untransformed original of a

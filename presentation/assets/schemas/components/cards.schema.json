@@ -1,0 +1,746 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "slides.yaml `with` for component cards (panel)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "anyOf": [
+        {
+          "type": "array"
+        },
+        {
+          "type": "string",
+          "pattern": "^@data:"
+        }
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "accent": {},
+    "title": {
+      "type": "string",
+      "description": "slide title (sentence case)"
+    },
+    "sources": {
+      "type": "array",
+      "description": "footer sources: strings, or {publisher, title, when, url} or {publisher, dataset, data_to, url}",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "publisher": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "when": {
+                "type": "string"
+              },
+              "dataset": {
+                "type": "string"
+              },
+              "data_to": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "short": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "takeaway": {
+      "description": "the slide's key point: a sentence, or [lead, rest]",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "box": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "the component's box [x, y, w, h] in inches (default: the content area)"
+    },
+    "overlays": {
+      "type": "array",
+      "description": "primitives drawn over the component: [{primitive, from, with}]",
+      "items": {
+        "type": "object",
+        "required": [
+          "primitive",
+          "with"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "primitive": {
+            "enum": [
+              "text",
+              "label",
+              "box",
+              "rule",
+              "vrule",
+              "line",
+              "dot",
+              "annotate"
+            ]
+          },
+          "from": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "with": {
+            "type": "object"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "text"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "w": {
+                      "type": "number"
+                    },
+                    "h": {
+                      "type": "number"
+                    },
+                    "content": {},
+                    "size": {
+                      "type": "number"
+                    },
+                    "color": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "bold": {
+                      "type": "boolean"
+                    },
+                    "font": {
+                      "type": "string"
+                    },
+                    "align": {
+                      "type": "string",
+                      "enum": [
+                        "center",
+                        "distribute",
+                        "justify",
+                        "justify_low",
+                        "left",
+                        "mixed",
+                        "right",
+                        "thai_distribute"
+                      ]
+                    },
+                    "anchor": {
+                      "type": "string",
+                      "enum": [
+                        "bottom",
+                        "middle",
+                        "mixed",
+                        "top"
+                      ]
+                    },
+                    "name": {},
+                    "spacing": {},
+                    "line": {},
+                    "caps": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "h",
+                    "content"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "label"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "w": {
+                      "type": "number"
+                    },
+                    "content": {},
+                    "color": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "size": {
+                      "type": "number"
+                    },
+                    "name": {},
+                    "align": {
+                      "type": "string",
+                      "enum": [
+                        "center",
+                        "distribute",
+                        "justify",
+                        "justify_low",
+                        "left",
+                        "mixed",
+                        "right",
+                        "thai_distribute"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "content"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "box"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "w": {
+                      "type": "number"
+                    },
+                    "h": {
+                      "type": "number"
+                    },
+                    "fill": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "name": {},
+                    "shape": {
+                      "type": "string",
+                      "enum": [
+                        "action_button_back_or_previous",
+                        "action_button_beginning",
+                        "action_button_custom",
+                        "action_button_document",
+                        "action_button_end",
+                        "action_button_forward_or_next",
+                        "action_button_help",
+                        "action_button_home",
+                        "action_button_information",
+                        "action_button_movie",
+                        "action_button_return",
+                        "action_button_sound",
+                        "arc",
+                        "balloon",
+                        "bent_arrow",
+                        "bent_up_arrow",
+                        "bevel",
+                        "block_arc",
+                        "can",
+                        "chart_plus",
+                        "chart_star",
+                        "chart_x",
+                        "chevron",
+                        "chord",
+                        "circular_arrow",
+                        "cloud",
+                        "cloud_callout",
+                        "corner",
+                        "corner_tabs",
+                        "cross",
+                        "cube",
+                        "curved_down_arrow",
+                        "curved_down_ribbon",
+                        "curved_left_arrow",
+                        "curved_right_arrow",
+                        "curved_up_arrow",
+                        "curved_up_ribbon",
+                        "decagon",
+                        "diagonal_stripe",
+                        "diamond",
+                        "dodecagon",
+                        "donut",
+                        "double_brace",
+                        "double_bracket",
+                        "double_wave",
+                        "down_arrow",
+                        "down_arrow_callout",
+                        "down_ribbon",
+                        "explosion1",
+                        "explosion2",
+                        "flowchart_alternate_process",
+                        "flowchart_card",
+                        "flowchart_collate",
+                        "flowchart_connector",
+                        "flowchart_data",
+                        "flowchart_decision",
+                        "flowchart_delay",
+                        "flowchart_direct_access_storage",
+                        "flowchart_display",
+                        "flowchart_document",
+                        "flowchart_extract",
+                        "flowchart_internal_storage",
+                        "flowchart_magnetic_disk",
+                        "flowchart_manual_input",
+                        "flowchart_manual_operation",
+                        "flowchart_merge",
+                        "flowchart_multidocument",
+                        "flowchart_offline_storage",
+                        "flowchart_offpage_connector",
+                        "flowchart_or",
+                        "flowchart_predefined_process",
+                        "flowchart_preparation",
+                        "flowchart_process",
+                        "flowchart_punched_tape",
+                        "flowchart_sequential_access_storage",
+                        "flowchart_sort",
+                        "flowchart_stored_data",
+                        "flowchart_summing_junction",
+                        "flowchart_terminator",
+                        "folded_corner",
+                        "frame",
+                        "funnel",
+                        "gear_6",
+                        "gear_9",
+                        "half_frame",
+                        "heart",
+                        "heptagon",
+                        "hexagon",
+                        "horizontal_scroll",
+                        "isosceles_triangle",
+                        "left_arrow",
+                        "left_arrow_callout",
+                        "left_brace",
+                        "left_bracket",
+                        "left_circular_arrow",
+                        "left_right_arrow",
+                        "left_right_arrow_callout",
+                        "left_right_circular_arrow",
+                        "left_right_ribbon",
+                        "left_right_up_arrow",
+                        "left_up_arrow",
+                        "lightning_bolt",
+                        "line_callout_1",
+                        "line_callout_1_accent_bar",
+                        "line_callout_1_border_and_accent_bar",
+                        "line_callout_1_no_border",
+                        "line_callout_2",
+                        "line_callout_2_accent_bar",
+                        "line_callout_2_border_and_accent_bar",
+                        "line_callout_2_no_border",
+                        "line_callout_3",
+                        "line_callout_3_accent_bar",
+                        "line_callout_3_border_and_accent_bar",
+                        "line_callout_3_no_border",
+                        "line_callout_4",
+                        "line_callout_4_accent_bar",
+                        "line_callout_4_border_and_accent_bar",
+                        "line_callout_4_no_border",
+                        "line_inverse",
+                        "math_divide",
+                        "math_equal",
+                        "math_minus",
+                        "math_multiply",
+                        "math_not_equal",
+                        "math_plus",
+                        "moon",
+                        "no_symbol",
+                        "non_isosceles_trapezoid",
+                        "notched_right_arrow",
+                        "octagon",
+                        "oval",
+                        "oval_callout",
+                        "parallelogram",
+                        "pentagon",
+                        "pie",
+                        "pie_wedge",
+                        "plaque",
+                        "plaque_tabs",
+                        "quad_arrow",
+                        "quad_arrow_callout",
+                        "rectangle",
+                        "rectangular_callout",
+                        "regular_pentagon",
+                        "right_arrow",
+                        "right_arrow_callout",
+                        "right_brace",
+                        "right_bracket",
+                        "right_triangle",
+                        "round_1_rectangle",
+                        "round_2_diag_rectangle",
+                        "round_2_same_rectangle",
+                        "rounded_rectangle",
+                        "rounded_rectangular_callout",
+                        "smiley_face",
+                        "snip_1_rectangle",
+                        "snip_2_diag_rectangle",
+                        "snip_2_same_rectangle",
+                        "snip_round_rectangle",
+                        "square_tabs",
+                        "star_10_point",
+                        "star_12_point",
+                        "star_16_point",
+                        "star_24_point",
+                        "star_32_point",
+                        "star_4_point",
+                        "star_5_point",
+                        "star_6_point",
+                        "star_7_point",
+                        "star_8_point",
+                        "striped_right_arrow",
+                        "sun",
+                        "swoosh_arrow",
+                        "tear",
+                        "trapezoid",
+                        "u_turn_arrow",
+                        "up_arrow",
+                        "up_arrow_callout",
+                        "up_down_arrow",
+                        "up_down_arrow_callout",
+                        "up_ribbon",
+                        "vertical_scroll",
+                        "wave"
+                      ]
+                    },
+                    "tex": {}
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "h"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "rule"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "w": {
+                      "type": "number"
+                    },
+                    "color": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "weight": {
+                      "type": "number"
+                    },
+                    "name": {}
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "w"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "vrule"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "h": {
+                      "type": "number"
+                    },
+                    "color": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "weight": {
+                      "type": "number"
+                    },
+                    "name": {}
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "h"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "line"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x1": {
+                      "type": "number"
+                    },
+                    "y1": {
+                      "type": "number"
+                    },
+                    "x2": {
+                      "type": "number"
+                    },
+                    "y2": {
+                      "type": "number"
+                    },
+                    "color": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "weight": {
+                      "type": "number"
+                    },
+                    "dash": {
+                      "type": "boolean"
+                    },
+                    "arrow": {
+                      "type": "boolean"
+                    },
+                    "name": {}
+                  },
+                  "required": [
+                    "x1",
+                    "y1",
+                    "x2",
+                    "y2"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "dot"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "cx": {
+                      "type": "number"
+                    },
+                    "cy": {
+                      "type": "number"
+                    },
+                    "d": {
+                      "type": "number"
+                    },
+                    "fill": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "name": {}
+                  },
+                  "required": [
+                    "cx",
+                    "cy",
+                    "d"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "primitive": {
+                  "const": "annotate"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "with": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "head": {},
+                    "sub": {},
+                    "w": {
+                      "type": "number"
+                    },
+                    "align": {
+                      "type": "string",
+                      "enum": [
+                        "center",
+                        "distribute",
+                        "justify",
+                        "justify_low",
+                        "left",
+                        "mixed",
+                        "right",
+                        "thai_distribute"
+                      ]
+                    },
+                    "color": {
+                      "type": "string",
+                      "pattern": "^@[a-z][a-z0-9_]*$",
+                      "description": "a colour role, e.g. @accent"
+                    },
+                    "size": {
+                      "type": "number"
+                    },
+                    "name": {},
+                    "anchor": {
+                      "type": "string",
+                      "enum": [
+                        "bottom",
+                        "middle",
+                        "mixed",
+                        "top"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "head"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "reveal": {
+      "type": "boolean",
+      "description": "builds reveal the component item by item (default true); false keeps it whole and builds only the overlays"
+    }
+  },
+  "required": [
+    "items",
+    "title"
+  ]
+}

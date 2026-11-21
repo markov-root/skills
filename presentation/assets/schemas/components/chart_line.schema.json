@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "slides.yaml `with` for component chart_line (chart)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "categories": {
+      "anyOf": [
+        {
+          "type": "array"
+        },
+        {
+          "type": "string",
+          "pattern": "^@data:"
+        }
+      ]
+    },
+    "series": {
+      "anyOf": [
+        {
+          "type": "array"
+        },
+        {
+          "type": "string",
+          "pattern": "^@data:"
+        }
+      ]
+    },
+    "y_axis": {
+      "anyOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "string",
+          "pattern": "^@data:"
+        }
+      ]
+    },
+    "layout": {
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "description": "slide title (sentence case)"
+    },
+    "sources": {
+      "type": "array",
+      "description": "footer sources: strings, or {publisher, title, when, url} or {publisher, dataset, data_to, url}",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "publisher": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "when": {
+                "type": "string"
+              },
+              "dataset": {
+                "type": "string"
+              },
+              "data_to": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "short": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "takeaway": {
+      "description": "the slide's key point: a sentence, or [lead, rest]",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "rail": {
+      "type": "object",
+      "description": "kwargs for the side rail (head, hero, unit, context, facts, note)"
+    },
+    "legend": {
+      "type": "array",
+      "description": "[[kind, colour, text]] under the chart"
+    },
+    "rail_side": {
+      "enum": [
+        "right",
+        "left"
+      ]
+    },
+    "rail_sync": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "categories",
+    "series",
+    "title",
+    "y_axis"
+  ]
+}

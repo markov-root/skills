@@ -49,17 +49,17 @@
       "required": ["source_registry", "claims_ledger", "consumer_manifest"],
       "properties": {
         "source_registry": {
-          "description": "Attribution registry with per-asset provenance (e.g. governments/spain/visuals/_shared/sources.json).",
+          "description": "Attribution registry with per-asset provenance (e.g. talks/example/visuals/_shared/sources.json).",
           "type": "string",
           "minLength": 1
         },
         "claims_ledger": {
-          "description": "The claims ledger every load-bearing figure resolves into (e.g. governments/spain/research/CLAIMS.md).",
+          "description": "The claims ledger every load-bearing figure resolves into (e.g. talks/example/research/CLAIMS.md).",
           "type": "string",
           "minLength": 1
         },
         "consumer_manifest": {
-          "description": "The join between consumers and assets: one path, or a list of glob patterns, relative to the project root (e.g. governments/spain/deck/SLIDES.md, or [\"../modules/*/deck/deck.yaml\"]). `..` is allowed here only. A *.yaml or *.yml manifest is read as a presentation deck.yaml whose `visuals:` mapping pins key -> latest | X.Y.Z; any other file is scanned for visuals/<slug>/latest references.",
+          "description": "The join between consumers and assets: one path, or a list of glob patterns, relative to the project root (e.g. talks/example/deck/SLIDES.md, or [\"../modules/*/deck/deck.yaml\"]). `..` is allowed here only. A *.yaml or *.yml manifest is read as a presentation deck.yaml whose `visuals:` mapping pins key -> latest | X.Y.Z; any other file is scanned for visuals/<slug>/latest references.",
           "oneOf": [
             { "type": "string", "minLength": 1 },
             {
