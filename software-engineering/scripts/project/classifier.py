@@ -148,7 +148,11 @@ def git_changes(root: Path, base_ref: str | None = None) -> tuple[Change, ...]:
         if untracked.status != "passed":
             error = untracked.stderr.decode(errors="replace").strip()
             raise RuntimeError(error or "git ls-files failed")
-        result.extend(Change(path, "??") for path in untracked.stdout.decode().split("\0") if path)
+        result.extend(
+            Change(path, "??")
+            for path in untracked.stdout.decode("utf-8", "surrogateescape").split("\0")
+            if path
+        )
     return tuple(dict.fromkeys(result))
 
 

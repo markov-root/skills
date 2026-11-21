@@ -14,6 +14,9 @@
 # and each observation is appended to a local session log. Reentrancy-safe: the hook performs only
 # bounded filesystem checks and never invokes the CLI, so it cannot trigger the tools it observes.
 #
+# Task 0118: input parsing AND the code/build-file classification come from se_gate_shared.py —
+# the ONE file-class source shared by every dialect (consult sh, lifecycle sh, OpenCode template).
+#
 # Env knobs: SE_LIFECYCLE_DISABLE=1 silences reminders (recording still happens);
 #            SE_LIFECYCLE_SILENT=1 disables both reminders and recording (full bypass).
 set -uo pipefail
@@ -27,20 +30,12 @@ DIALECT="${1:-claude}"     # claude | codex ; anything else behaves like claude
 input="$(cat 2>/dev/null)" || emit_none
 [ -n "$input" ] || emit_none
 
-# Extract only the fields we need, one per line (path/space safe). Any failure → silent.
-mapfile -t F < <(printf '%s' "$input" | python3 -c '
-import sys, json
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-ti = d.get("tool_input") or {}
-print(d.get("hook_event_name") or d.get("hookEventName") or "")
-print(d.get("tool_name", ""))
-print(ti.get("file_path") or ti.get("path") or "")
-print(d.get("session_id", ""))
-print(d.get("cwd") or ti.get("cwd") or "")
-' 2>/dev/null) || emit_none
+# Extract the fields we need, one per line (path/space safe), plus the code-file verdict —
+# all from the shared module. Any failure (missing module, missing python3, crash) → empty
+# output → silent: this hook never blocks and never spams.
+helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/se_gate_shared.py"
+mapfile -t F < <(printf '%s' "$input" | python3 "$helper" lifecycle 2>/dev/null)
+[ "${#F[@]}" -ge 6 ] || emit_none
 
 EVENT="${F[0]:-}"; TOOL="${F[1]:-}"; FILE="${F[2]:-}"; SID="${F[3]:-}"; CWD="${F[4]:-}"
 # The session id becomes a filename for the throttle marker and log, so it must never carry path
@@ -81,15 +76,10 @@ if [ -z "$kind" ] && [ -n "$FILE" ]; then
 fi
 [ -n "$kind" ] || emit_none
 
-# Only remind about edits for code/build files (mirror the consult-gate set); never for prose/data.
-if [ "$kind" = "edit" ]; then
-  case "$FILE" in
-    *.py|*.js|*.mjs|*.cjs|*.ts|*.tsx|*.jsx|*.go|*.rs|*.c|*.h|*.cc|*.cpp|*.hpp|*.java|*.kt|*.rb|\
-    *.php|*.swift|*.lua|*.sh|*.bash|*.sql|*.cs|*.ex|*.exs|*.dart|*.hs) : ;;
-    */Dockerfile|Dockerfile|*/Makefile|Makefile|*.mk|*/pyproject.toml|*/Cargo.toml|*/go.mod|\
-    */package.json|*/CMakeLists.txt) : ;;
-    *) emit_none ;;
-  esac
+# Only remind about edits for code/build files — the SAME shared class set the consult gate
+# gates (se_gate_shared.py); never for prose/data.
+if [ "$kind" = "edit" ] && [ "${F[5]:-0}" != 1 ]; then
+  emit_none
 fi
 
 # Decide the advisory message. Silent when there is nothing to remind about.

@@ -11,17 +11,35 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-import yaml
 
-# Installed skills may be read-only, and local Vercel installs copy unmanaged files verbatim.
-sys.dont_write_bytecode = True
+# Task 0134: compiled bytecode belongs in one user cache directory, never inside the
+# (possibly read-only, possibly installed) skill folder, so warm starts skip the
+# recompilation of the ~92-module runtime. Mirrors the skill's own cache layout.
+def _bytecode_cache_prefix() -> str:
+    cache_home = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    version = f"py{sys.version_info.major}{sys.version_info.minor}"
+    return str(Path(cache_home) / "software-engineering" / "pycache" / version)
+
+
+sys.pycache_prefix = _bytecode_cache_prefix()
+
+# Tell the bundled launcher that Python started, so it never mistakes an application error
+# for a uv cache failure and re-runs the command (task 0102).
+if _started := os.environ.pop("ENGINEERING_LAUNCHER_STARTED", None):
+    try:
+        Path(_started).touch()
+    except OSError:
+        pass
 
 
 def _skill_version() -> str:
     """Read the release identity from the artifact's single version source."""
+    import yaml  # deferred: only needed when the version is actually rendered
+
     skill_file = Path(__file__).resolve().parent.parent / "SKILL.md"
     parts = skill_file.read_text(encoding="utf-8").split("---", 2)
     if len(parts) != 3:

@@ -70,7 +70,8 @@
               "partial",
               "blocked",
               "done",
-              "superseded"
+              "superseded",
+              "declined"
             ]
           },
           "authority": {
@@ -291,6 +292,7 @@
       "required": ["criteria"],
       "properties": {
         "criteria": { "$ref": "#/$defs/criterion_references" },
+        "rationale": { "type": "string" },
         "blocker": { "$ref": "#/$defs/nonempty" },
         "depends_on": { "$ref": "#/$defs/task_ids" },
         "parent": { "$ref": "#/$defs/task_id" },

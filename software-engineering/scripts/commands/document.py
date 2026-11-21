@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shlex
 import subprocess
 from collections.abc import Sequence
@@ -40,6 +41,7 @@ from ..documents.validation import (
     validate_adopted_documents,
     validate_documents,
 )
+from ..execution import run_process
 from ..policy.document_paths import DocumentContainment
 from ..policy.document_selection import DocumentSelection, resolve_document_selection
 from ..policy.manifest import (
@@ -83,6 +85,7 @@ def configure(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument("identifiers", nargs="*", metavar="IDENTIFIER")
+    parser.add_argument("--base", help="ratchet document validation against this Git ref")
     parser.add_argument("--direction", choices=("inbound", "outbound", "both"), default="both")
     parser.add_argument("--max-depth", type=int, default=8)
     parser.add_argument("--title", help="reviewed title for 'document new/backfill'")
@@ -206,6 +209,85 @@ def _render_findings(findings: Sequence[dict[str, Any]]) -> str:
             )
         )
     return "\n".join((*lines, ""))
+
+
+def _validation_scope(
+    root: Path,
+    requested: Sequence[str],
+    policies: Sequence[DocsCurrencyPolicy | None],
+    markdown_paths: Sequence[str] = (),
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if not requested:
+        return {"mode": "repository", "selected_paths": None, "skipped_rules": []}, []
+    adopted = set(markdown_paths)
+    for policy in policies:
+        for role in () if policy is None else policy.roles:
+            adopted.update(expand_markdown_paths(root, role.include))
+            if role.index is not None and (root / role.index).is_file():
+                adopted.add(role.index)
+    selected: set[str] = set()
+    errors = []
+    for raw in requested:
+        try:
+            path = (root / raw).resolve().relative_to(root.resolve()).as_posix()
+        except (OSError, RuntimeError, ValueError):
+            path = raw
+        if path in adopted:
+            selected.add(path)
+        else:
+            errors.append(
+                {
+                    "id": "document.path-not-adopted",
+                    "severity": "error",
+                    "message": "requested path is missing or outside the adopted document set",
+                    "provenance": {"path": path, "line": 1},
+                    "ci_blocking": True,
+                    "rationale": "an explicit validation request must not silently omit a path",
+                    "repair": "select an existing adopted document path",
+                }
+            )
+    return {
+        "mode": "paths",
+        "requested_paths": list(requested),
+        "selected_paths": sorted(selected),
+        "context": "adopted documents are scanned for cross-document consistency",
+        "skipped_rules": [
+            "unselected-document-local-rules",
+            "cross-document-rules-unrelated-to-selection",
+        ],
+    }, errors
+
+
+def _scope_findings(
+    findings: Sequence[dict[str, Any]],
+    scope: dict[str, Any],
+    errors: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if scope["mode"] == "repository":
+        return list(findings)
+    selected = set(scope["selected_paths"])
+    return [
+        *[
+            item
+            for item in findings
+            if item["provenance"]["path"] in selected
+            or item["id"] == "document.source-truncated"
+            or any(
+                re.search(rf"(?<![\w./-]){re.escape(path)}(?![\w./-])", item["message"])
+                for path in selected
+            )
+        ],
+        *errors,
+    ]
+
+
+def _scope_human(scope: dict[str, Any]) -> str:
+    if scope["mode"] == "repository":
+        return ""
+    return (
+        f"Validation scope: {', '.join(scope['selected_paths']) or '(no adopted paths)'}\n"
+        f"Skipped rules: {', '.join(scope['skipped_rules'])}\n"
+    )
 
 
 def _render_graph(payload: dict[str, Any]) -> str:
@@ -334,13 +416,13 @@ def _render_inventory(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _changed_paths(root: Path) -> list[str]:
+def _changed_entries(root: Path) -> list[tuple[str, str]]:
     observed = discover_observation_root(root)
     git_root = observed.git_root
     if git_root is None:
         raise RuntimeError("Git changed-path context is unavailable")
     prefix = root.resolve().relative_to(git_root.resolve()).as_posix()
-    paths = []
+    entries = []
     for item in git_changes(git_root):
         relative = item.path
         if prefix not in {"", "."}:
@@ -348,11 +430,20 @@ def _changed_paths(root: Path) -> list[str]:
             if not relative.startswith(marker):
                 continue
             relative = relative[len(marker) :]
-        paths.append(relative)
-    return paths
+        entries.append((relative, item.status))
+    return entries
+
+
+def _rename_only(entries: list[tuple[str, str]]) -> frozenset[str]:
+    """Paths whose only change is a pure rename (git R100) in every listing."""
+    renamed = {path for path, status in entries if status == "R100"}
+    edited = {path for path, status in entries if status != "R100"}
+    return frozenset(renamed - edited)
 
 
 def _validate_options(args: argparse.Namespace) -> None:
+    if args.action != "validate" and args.base is not None:
+        raise ValueError("--base requires 'document validate'")
     if args.action != "trace" and (args.direction != "both" or args.max_depth != 8):
         raise ValueError("--direction and --max-depth require 'document trace'")
     if args.action not in {"new", "backfill"} and args.title is not None:
@@ -379,10 +470,19 @@ def _query(args: argparse.Namespace) -> CommandResult:
     )
     if isinstance(selection.manifest, ManifestV2):
         return _query_v2(args, selection)
-    resolution = resolve_explicit_project_root(args.project_root)
-    manifest = load_explicit_manifest(resolution, required=False)
+    # Task 0136: an adopted ancestor manifest anchors the query at its own root;
+    # the manifestless exact-root fallback only applies when nothing resolved.
+    if selection.manifest is not None:
+        manifest = selection.manifest
+        root = selection.repository_root
+        serialized_resolution = selection.to_dict()
+    else:
+        resolution = resolve_explicit_project_root(args.project_root)
+        manifest = load_explicit_manifest(resolution, required=False)
+        root = resolution.root
+        serialized_resolution = resolution.to_dict()
     policy = manifest.task_inventory if manifest is not None else None
-    report = document_query(resolution.root, policy)
+    report = document_query(root, policy)
     if args.compact:
         report = compact_document_query(
             report,
@@ -390,7 +490,6 @@ def _query(args: argparse.Namespace) -> CommandResult:
             filters=tuple(args.planning_filter),
             order_by=tuple(args.planning_order),
         )
-    serialized_resolution = resolution.to_dict()
     data = {
         "action": "query",
         "role": "task",
@@ -402,13 +501,13 @@ def _query(args: argparse.Namespace) -> CommandResult:
         },
     }
     human = _render_inventory(report)
-    if resolution.changed:
+    if manifest is None and resolution.changed:
         human = (
             f"> Warning: requested `{resolution.requested}` resolved to `{resolution.root}`; "
             "traversal remains anchored there and no ancestor repository was substituted.\n\n"
             + human
         )
-    return CommandResult(report["status"], resolution.root, data, human=human)
+    return CommandResult(report["status"], root, data, human=human)
 
 
 def _query_v2(args: argparse.Namespace, selection: DocumentSelection) -> CommandResult:
@@ -662,9 +761,17 @@ def handle(args: argparse.Namespace) -> CommandResult:
     )
     if isinstance(selection.manifest, ManifestV2):
         return _handle_v2(args, selection)
-    resolution = resolve_explicit_project_root(args.project_root)
-    root = resolution.root
-    manifest = load_explicit_manifest(resolution, required=False)
+    # Task 0136: an adopted ancestor manifest anchors every legacy verb at its own
+    # root; the manifestless exact-root fallback only applies when nothing resolved.
+    if selection.manifest is not None:
+        root = selection.repository_root
+        manifest = selection.manifest
+        root_resolution = selection.to_dict()
+    else:
+        resolution = resolve_explicit_project_root(args.project_root)
+        root = resolution.root
+        manifest = load_explicit_manifest(resolution, required=False)
+        root_resolution = resolution.to_dict()
     adopted_roles = role_catalog(manifest.docs.currency) if manifest is not None else ()
     if args.action == "roles":
         if args.identifiers:
@@ -677,7 +784,7 @@ def handle(args: argparse.Namespace) -> CommandResult:
             {
                 "action": "roles",
                 "adopted": adopted,
-                "root_resolution": resolution.to_dict(),
+                "root_resolution": root_resolution,
                 "count": len(roles),
                 "roles": list(roles),
                 "limitations": [
@@ -692,28 +799,32 @@ def handle(args: argparse.Namespace) -> CommandResult:
             human=_render_roles(roles),
         )
     if args.action == "validate" and (manifest is None or manifest.docs.currency is None):
-        if args.identifiers:
-            raise ValueError("document validate does not accept identifiers")
+        if args.base is not None:
+            raise ValueError("--base requires adopted docs.currency roles")
         docs_policy = manifest.docs if manifest is not None else DocsPolicy()
         paths = expand_markdown_paths(root, docs_policy.include or ("**/*.md",))
+        scope, scope_errors = _validation_scope(root, args.identifiers, (), paths)
         findings = validate_documents(root, docs_policy, paths)
-        public_findings = [_public_finding(item) for item in findings]
+        public_findings = _scope_findings(
+            [_public_finding(item) for item in findings], scope, scope_errors
+        )
         return CommandResult(
-            "failed" if findings else "passed",
+            "failed" if public_findings else "passed",
             root,
             {
                 "action": "validate",
                 "adopted": False,
-                "root_resolution": resolution.to_dict(),
+                "root_resolution": root_resolution,
                 "roles": [],
                 "findings": public_findings,
+                "validation_scope": scope,
                 "limitations": [
                     "Without docs.currency adoption, validation is limited to read-only Markdown/link structure.",
                     "Run engineering document roles to retrieve templates before adopting typed roles.",
                 ],
             },
-            EXIT_CHECK_FAILED if findings else EXIT_OK,
-            _render_findings(public_findings),
+            EXIT_CHECK_FAILED if public_findings else EXIT_OK,
+            _scope_human(scope) + _render_findings(public_findings),
         )
     if manifest is None:
         load_explicit_manifest(resolution, required=True)
@@ -772,25 +883,46 @@ def handle(args: argparse.Namespace) -> CommandResult:
         )
         return CommandResult("passed", root, data, human=human)
     if args.action == "validate":
-        if args.identifiers:
-            raise ValueError("document validate does not accept identifiers")
-        changed_document_paths, changed_provenance = _changed_paths_provenance(root)
+        scope, scope_errors = _validation_scope(root, args.identifiers, (manifest.docs.currency,))
+        changed_document_paths, changed_provenance = _changed_paths_provenance(root, args.base)
+        if scope["mode"] == "paths" and changed_document_paths is not None:
+            changed_document_paths = sorted(
+                set(changed_document_paths) | set(scope["selected_paths"])
+            )
         current_date = datetime.now(UTC).date().isoformat()
         findings = validate_adopted_documents(
             root,
             manifest.docs.currency,
             changed_paths=changed_document_paths,
+            rename_only_paths=frozenset(changed_provenance.get("rename_only") or ()),
             current_date=current_date,
+            date_changed_paths=changed_provenance.get("worktree_paths"),
         )
-        public_findings = [_public_finding(item) for item in findings]
-        blocking = [item for item in findings if item.severity == "error" or item.ci_blocking]
-        human = _render_findings(public_findings)
+        public_findings = _scope_findings(
+            [_public_finding(item) for item in findings], scope, scope_errors
+        )
+        blocking = [
+            item for item in public_findings if item["severity"] == "error" or item["ci_blocking"]
+        ]
+        human = (
+            _scope_human(scope)
+            + _base_human(changed_provenance, public_findings)
+            + _render_findings(public_findings)
+        )
         if changed_provenance["mode"] == "unavailable":
             status = "unavailable"
             exit_code = EXIT_UNAVAILABLE
             human = f"{_unavailable_human(changed_provenance)}\n{human}"
         else:
-            status = "failed" if blocking else ("partial" if findings else "passed")
+            status = (
+                "failed"
+                if blocking
+                else (
+                    "partial"
+                    if public_findings or changed_provenance.get("base_fallback")
+                    else "passed"
+                )
+            )
             exit_code = EXIT_CHECK_FAILED if blocking else EXIT_OK
         return CommandResult(
             status,
@@ -798,9 +930,13 @@ def handle(args: argparse.Namespace) -> CommandResult:
             {
                 "action": "validate",
                 "adopted": True,
-                "root_resolution": resolution.to_dict(),
+                "root_resolution": root_resolution,
                 "roles": [role["role"] for role in roles],
                 "findings": public_findings,
+                "validation_scope": scope,
+                "inherited_findings_count": sum(
+                    not item["ci_blocking"] for item in public_findings
+                ),
                 "changed_paths": {**changed_provenance, "validation_date": current_date},
                 "limitations": [
                     "Validation proves recorded structure and internal lifecycle consistency only.",
@@ -942,16 +1078,89 @@ def _dedupe_v2_findings(findings: Sequence[dict[str, Any]]) -> list[dict[str, An
     return deduped
 
 
-def _changed_paths_provenance(root: Path) -> tuple[list[str] | None, dict[str, Any]]:
+def _git_output(root: Path, *arguments: str) -> str:
+    result = run_process(
+        ("git", "-C", str(root), *arguments),
+        root=root,
+        timeout_seconds=10,
+        max_output_bytes=65_536,
+    )
+    if result.status != "passed" or result.stdout_truncated or result.stderr_truncated:
+        raise RuntimeError(
+            result.stderr.decode(errors="replace").strip() or "Git base discovery failed"
+        )
+    return result.stdout.decode(errors="strict").strip()
+
+
+def _base_context(root: Path, requested: str | None) -> dict[str, Any]:
+    if requested is None:
+        remote_defaults = _git_output(
+            root, "for-each-ref", "--format=%(symref)", "refs/remotes"
+        ).splitlines()
+        candidates = sorted({value for value in remote_defaults if value})
+        if not candidates:
+            candidates = _git_output(
+                root, "for-each-ref", "--format=%(refname)", "refs/heads/main", "refs/heads/master"
+            ).splitlines()
+        if len(candidates) != 1:
+            return {
+                "base_ref": None,
+                "effective_base": None,
+                "base_fallback": "strict-all-documents",
+                "base_reason": "default branch unavailable or ambiguous; pass --base REF",
+            }
+        reference = candidates[0]
+    else:
+        reference = requested
+    commit = _git_output(
+        root, "rev-parse", "--verify", "--end-of-options", f"{reference}^{{commit}}"
+    )
+    effective = _git_output(root, "merge-base", "HEAD", commit) if requested is None else commit
+    return {
+        "base_ref": reference,
+        "effective_base": effective,
+        "base_fallback": None,
+        "base_reason": None,
+    }
+
+
+def _base_human(provenance: dict[str, Any], findings: Sequence[dict[str, Any]]) -> str:
+    inherited = sum(not item["ci_blocking"] for item in findings)
+    if provenance.get("base_fallback"):
+        return f"Validation base unavailable: {provenance['base_reason']}; fallback: {provenance['base_fallback']}.\n"
+    if provenance.get("effective_base"):
+        return f"Validation base: {provenance['base_ref']} ({provenance['effective_base']}); inherited findings: {inherited}.\n"
+    return ""
+
+
+def _changed_paths_provenance(
+    root: Path, base: str | None = None
+) -> tuple[list[str] | None, dict[str, Any]]:
     """Resolve changed paths once per validate path and describe the ratchet inputs.
 
     Task 0105: discovery failure is explicit — the report records an unavailable
     mode with the reason and the strict-legacy fallback policy instead of a silent
-    all-clear, while the current-worktree policy (staged+unstaged+untracked) is
-    recorded honestly when listing succeeds.
+    all-clear. Task 0125 adds base-relative committed changes to the local worktree
+    set. A missing default branch enforces all documents and reports that fallback.
     """
+    worktree_paths: list[str] | None = None
     try:
-        paths = _changed_paths(root)
+        entries = _changed_entries(root)
+        worktree_paths = sorted({path for path, _status in entries})
+        context = _base_context(root, base)
+        if context["effective_base"]:
+            observed = discover_observation_root(root)
+            git_root = observed.git_root
+            if git_root is None:
+                raise RuntimeError("Git base context is unavailable")
+            prefix = root.resolve().relative_to(git_root.resolve()).as_posix()
+            for item in git_changes(git_root, context["effective_base"]):
+                path = item.path
+                if prefix not in {"", "."}:
+                    if not path.startswith(f"{prefix}/"):
+                        continue
+                    path = path[len(prefix) + 1 :]
+                entries.append((path, item.status))
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         return None, {
             "mode": "unavailable",
@@ -959,14 +1168,25 @@ def _changed_paths_provenance(root: Path) -> tuple[list[str] | None, dict[str, A
             "count": None,
             "reason": str(exc) or type(exc).__name__,
             "policy": "strict-legacy-fallback",
+            "worktree_paths": worktree_paths,
+            "base_ref": base,
+            "effective_base": None,
+            "base_fallback": "strict-all-documents",
+            "base_reason": str(exc),
         }
+    paths = [path for path, _status in entries]
     unique = sorted({path.removeprefix("./") for path in paths if path})
-    return paths, {
+    return (None if context["base_fallback"] else paths), {
         "mode": "listed",
         "paths": unique,
         "count": len(unique),
+        "rename_only": sorted(_rename_only(entries)),
         "reason": None,
-        "policy": "current-worktree",
+        "policy": "base-and-current-worktree"
+        if context["effective_base"]
+        else "strict-all-documents",
+        "worktree_paths": worktree_paths,
+        **context,
     }
 
 
@@ -978,13 +1198,11 @@ def _unavailable_human(provenance: dict[str, Any]) -> str:
 
 
 def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> CommandResult:
-    if args.identifiers:
-        raise ValueError("document validate does not accept identifiers")
     manifest = selection.manifest
     if not isinstance(manifest, ManifestV2):
         raise TypeError("manifest-v2 validation received a legacy selection")
     root = _v2_repository_root(selection)
-    changed_document_paths, changed_provenance = _changed_paths_provenance(root)
+    changed_document_paths, changed_provenance = _changed_paths_provenance(root, args.base)
     current_date = datetime.now(UTC).date().isoformat()
 
     markdown_policy = DocsPolicy(
@@ -993,6 +1211,16 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
         forbid_legacy_links=manifest.docs.forbid_legacy_links,
     )
     paths = expand_markdown_paths(root, markdown_policy.include or ("**/*.md",))
+    validation_scope, scope_errors = _validation_scope(
+        root,
+        args.identifiers,
+        (manifest.docs.currency, *(project.currency for project in selection.projects)),
+        paths,
+    )
+    if validation_scope["mode"] == "paths" and changed_document_paths is not None:
+        changed_document_paths = sorted(
+            set(changed_document_paths) | set(validation_scope["selected_paths"])
+        )
     tagged = [
         _tagged_public_finding(item, "global")
         for item in validate_documents(
@@ -1000,7 +1228,9 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
             markdown_policy,
             paths,
             changed_paths=changed_document_paths,
+            rename_only_paths=frozenset(changed_provenance.get("rename_only") or ()),
             current_date=current_date,
+            date_changed_paths=changed_provenance.get("worktree_paths"),
         )
     ]
 
@@ -1008,7 +1238,8 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
     global_scan = scan_typed_documents(
         root,
         manifest.docs.currency,
-        changed_paths=changed_document_paths or (),
+        changed_paths=changed_provenance.get("worktree_paths") or (),
+        rename_only_paths=frozenset(changed_provenance.get("rename_only") or ()),
         current_date=current_date,
         containment=global_containment,
     )
@@ -1018,6 +1249,7 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
             root,
             manifest.docs.currency,
             changed_paths=changed_document_paths,
+            rename_only_paths=frozenset(changed_provenance.get("rename_only") or ()),
             current_date=current_date,
             containment=global_containment,
             typed_scan=global_scan,
@@ -1034,7 +1266,8 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
         scan = scan_typed_documents(
             root,
             scope.currency,
-            changed_paths=changed_document_paths or (),
+            changed_paths=changed_provenance.get("worktree_paths") or (),
+            rename_only_paths=frozenset(changed_provenance.get("rename_only") or ()),
             current_date=current_date,
             containment=containment,
             extra_known_identities=global_identities,
@@ -1045,6 +1278,7 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
                 root,
                 scope.currency,
                 changed_paths=changed_document_paths,
+                rename_only_paths=frozenset(changed_provenance.get("rename_only") or ()),
                 current_date=current_date,
                 containment=containment,
                 extra_known_identities=global_identities,
@@ -1052,7 +1286,7 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
             )
         )
 
-    public_findings = _dedupe_v2_findings(tagged)
+    public_findings = _scope_findings(_dedupe_v2_findings(tagged), validation_scope, scope_errors)
     blocking = [
         item for item in public_findings if item["severity"] == "error" or item["ci_blocking"]
     ]
@@ -1061,13 +1295,25 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
         role_names.extend(item["role"] for item in role_catalog(scope.currency))
     role_names.extend(item["role"] for item in role_catalog(manifest.docs.currency))
     roles = list(dict.fromkeys(role_names))
-    human = _render_findings(public_findings)
+    human = (
+        _scope_human(validation_scope)
+        + _base_human(changed_provenance, public_findings)
+        + _render_findings(public_findings)
+    )
     if changed_provenance["mode"] == "unavailable":
         status = "unavailable"
         exit_code = EXIT_UNAVAILABLE
         human = f"{_unavailable_human(changed_provenance)}\n{human}"
     else:
-        status = "failed" if blocking else ("partial" if public_findings else "passed")
+        status = (
+            "failed"
+            if blocking
+            else (
+                "partial"
+                if public_findings or changed_provenance.get("base_fallback")
+                else "passed"
+            )
+        )
         exit_code = EXIT_CHECK_FAILED if blocking else EXIT_OK
     return CommandResult(
         status,
@@ -1081,6 +1327,8 @@ def _validate_v2(args: argparse.Namespace, selection: DocumentSelection) -> Comm
             ),
             "roles": roles,
             "findings": public_findings,
+            "validation_scope": validation_scope,
+            "inherited_findings_count": sum(not item["ci_blocking"] for item in public_findings),
             "changed_paths": {
                 **changed_provenance,
                 "validation_date": current_date,

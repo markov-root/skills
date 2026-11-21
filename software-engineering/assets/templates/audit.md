@@ -37,6 +37,8 @@ engineering_document:
 
 # Audit NNNN: Audit title
 
+<!-- engineering-placeholder-markers: {"Owner": "AUDIT OWNER", "Scope": "Subjects, versions, environment, and time boundary.", "Method": "Repeatable inspection method and selection limits.", "Findings": "Observed facts separated from inference.", "Limitations": "What was not observed or established.", "Disposition": "Accepted follow-up, owner, or explicit no-action decision."} -->
+
 <!-- Quality bar — write to the Audit content standard
 the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #audit):
 dated, bounded evaluation against an objective baseline · method stated before conclusions · scope

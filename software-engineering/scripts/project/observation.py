@@ -60,11 +60,13 @@ def _missing_concrete_paths(manifest: Manifest, root: Path) -> list[dict[str, An
     def record(
         field: str,
         name: str | None,
-        relative: str,
+        relative: str | None,
         kind: str,
         *,
         project: str | None = None,
     ) -> None:
+        if relative is None:
+            return  # optional path not declared (e.g. an index-less role, 0.13.2)
         candidate = root / relative
         try:
             candidate.resolve().relative_to(root_resolved)

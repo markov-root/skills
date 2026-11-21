@@ -217,7 +217,7 @@ def select_explanations(
 ) -> tuple[Explanation, ...]:
     unknown = tuple(identifier for identifier in identifiers if identifier not in CATALOG_BY_ID)
     if unknown:
-        raise KeyError(f"unknown explanation identifiers: {list(unknown)}")
+        raise ValueError(f"unknown explanation identifiers: {list(unknown)}")
     selected = (
         tuple(CATALOG_BY_ID[identifier] for identifier in dict.fromkeys(identifiers))
         if identifiers

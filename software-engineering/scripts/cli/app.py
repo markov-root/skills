@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from ..commands.contracts import (
     EXIT_BASELINE_INCOMPATIBLE,
+    EXIT_INTERNAL_ERROR,
     EXIT_INVALID_POLICY,
     EXIT_OK,
     EXIT_UNAVAILABLE,
@@ -57,6 +58,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "next_commands": [f"engineering explain command.{spec.name}"],
             },
             EXIT_UNAVAILABLE,
+        )
+    except Exception as exc:
+        if getattr(args, "debug", False):
+            raise
+        result = CommandResult(
+            "internal",
+            None,
+            {
+                "errors": [f"{type(exc).__name__}: {exc}"],
+                "next_commands": [
+                    f"engineering explain command.{spec.name}",
+                    "rerun with --debug for a full traceback",
+                ],
+            },
+            EXIT_INTERNAL_ERROR,
         )
     payload = envelope(spec.name, result)
     emit(payload, json_output=args.json, human=result.human)

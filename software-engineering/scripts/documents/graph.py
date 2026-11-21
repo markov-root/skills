@@ -571,7 +571,7 @@ def trace_graph(
     nodes = {item.id: item for item in graph.nodes}
     unknown = sorted(set(starts) - nodes.keys())
     if unknown:
-        raise KeyError(f"unknown graph identifiers: {unknown}")
+        raise ValueError(f"unknown graph identifiers: {unknown}")
     adjacency: dict[str, list[tuple[str, GraphEdge, str]]] = {}
     for edge in graph.edges:
         if direction in {"outbound", "both"}:
@@ -634,7 +634,7 @@ def trace_graph(
 def explain_graph_node(graph: DocumentGraph, identifier: str) -> dict[str, Any]:
     nodes = {item.id: item for item in graph.nodes}
     if identifier not in nodes:
-        raise KeyError(f"unknown graph identifier: {identifier}")
+        raise ValueError(f"unknown graph identifier: {identifier}")
     inbound = [asdict(item) for item in graph.edges if item.target == identifier]
     outbound = [asdict(item) for item in graph.edges if item.source == identifier]
     return {

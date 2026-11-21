@@ -19,8 +19,24 @@ EXIT_INVALID_POLICY = 2
 EXIT_UNAVAILABLE = 3
 EXIT_APPROVAL_REQUIRED = 4
 EXIT_BASELINE_INCOMPATIBLE = 5
-INCOMPATIBLE_ERRORS = (BaselineError, LifecycleError, FileNotFoundError)
-INVALID_ERRORS = (ManifestError, DiscoveryError, KeyError, ValueError)
+# 70 = BSD sysexits EX_SOFTWARE: an internal bug surfaced a traceback-shaped error.
+EXIT_INTERNAL_ERROR = 70
+# Exceptions here belong to the declared policy/baseline contract; generic Python errors
+# (KeyError, TypeError, OSError, re.error, ...) are internal bugs and map to
+# EXIT_INTERNAL_ERROR in cli/app.py instead of being misreported as user policy failures.
+INCOMPATIBLE_ERRORS = (BaselineError, LifecycleError)
+INVALID_ERRORS = (ManifestError, DiscoveryError, ValueError)
+
+# Single source of truth for the human-facing exit-code table.
+EXIT_CODES = {
+    EXIT_OK: "completed (or advisory-only result)",
+    EXIT_CHECK_FAILED: "a declared check or validation failed",
+    EXIT_INVALID_POLICY: "the invocation or adopted policy is invalid",
+    EXIT_UNAVAILABLE: "a required prerequisite or discovery step is unavailable",
+    EXIT_APPROVAL_REQUIRED: "a change requires outstanding approval",
+    EXIT_BASELINE_INCOMPATIBLE: "the run overlaps an incompatible baseline or lifecycle state",
+    EXIT_INTERNAL_ERROR: "an internal error; rerun with --debug for a traceback",
+}
 
 
 @dataclass(frozen=True)

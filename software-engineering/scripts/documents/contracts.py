@@ -105,13 +105,22 @@ def _edges(*pairs: tuple[str, str]) -> frozenset[tuple[str, str]]:
     return frozenset(pairs)
 
 
+def _task_states() -> tuple[str, ...]:
+    """Read the validator's published vocabulary rather than maintaining another enum."""
+    schema = json.loads(schema_path("document-metadata-v1.schema.json").read_text())
+    for clause in schema["allOf"]:
+        if clause.get("if", {}).get("properties", {}).get("role", {}).get("const") == "task":
+            return tuple(clause["then"]["properties"]["state"]["enum"])
+    raise ValueError("document metadata schema has no task state vocabulary")
+
+
 ROLE_CONTRACTS = {
     "task": DocumentRoleContract(
         "task",
         "work-state",
-        ("todo", "in_progress", "partial", "blocked", "done", "superseded"),
+        _task_states(),
         ("todo",),
-        ("done", "superseded"),
+        ("done", "superseded", "declined"),
         _edges(
             ("todo", "in_progress"),
             ("todo", "partial"),
@@ -134,6 +143,7 @@ ROLE_CONTRACTS = {
             ("blocked", "done"),
             ("blocked", "superseded"),
             ("done", "superseded"),
+            *((state, "declined") for state in ("todo", "in_progress", "partial", "blocked")),
         ),
         ("Problem", "Scope", "Out of scope", "Done when", "Completion evidence"),
     ),
@@ -245,6 +255,7 @@ STATE_PREDICATES: dict[str, frozenset[str]] = {
     "blocked": frozenset({"is_open", "is_blocked"}),
     "done": frozenset({"is_terminal_success"}),
     "superseded": frozenset({"is_terminal_noop"}),
+    "declined": frozenset({"is_terminal_noop"}),
 }
 
 
@@ -384,6 +395,16 @@ def _validate_record_semantics(
     history = metadata["transition_history"]
     full_contract = record_contract_tier(metadata) == "full"
 
+    if role == "task" and state == "declined":
+        rationale = metadata["details"].get("rationale")
+        if not isinstance(rationale, str) or not rationale.strip():
+            findings.append(
+                DocumentContractFinding(
+                    record.source,
+                    "document.declined-rationale-required",
+                    "a declined task must record a nonempty details.rationale",
+                )
+            )
     findings.extend(_validate_dates(record))
 
     if history in {"legacy-unknown", "unverified"}:

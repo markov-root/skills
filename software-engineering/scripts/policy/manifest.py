@@ -94,7 +94,12 @@ class GeneratedPolicy:
 class DocumentRolePolicy:
     name: str
     include: tuple[str, ...]
-    index: str
+    # Absent/null means the role registers no adopted index; currency skips all
+    # index registration findings for such roles.
+    index: str | None
+    # 0 declares an unnumbered role: slug-named files, no numeric-prefix or
+    # prefix-equals-id checks; identity and duplicate detection fall to the
+    # record metadata layer.
     id_prefix_digits: int
     states: tuple[str, ...] = ()
     current_state: str | None = None
@@ -468,7 +473,8 @@ def _v2_project_issues(loaded: dict[str, Any], repo_root: Path) -> list[str]:
             issues.append(f"{project_path}.docs_root: docs_root must be an existing directory")
             continue
         resolved_docs_root = lexical_docs_root.resolve()
-        if not _is_within(resolved_docs_root, resolved_root, strict=True):
+        # docs_root may equal the project root ("."), so records can sit directly in docs/.
+        if not _is_within(resolved_docs_root, resolved_root):
             issues.append(f"{project_path}.docs_root: docs_root must resolve inside project root")
             continue
 
@@ -761,7 +767,8 @@ def load_manifest(path: str | Path, *, schema_path: str | Path | None = None) ->
                     f"$.docs.currency.roles[{index}].include[{subindex}]: "
                     "invalid repository-relative glob"
                 )
-        if not _valid_relative_path(role.get("index", "")):
+        index_value = role.get("index")
+        if index_value is not None and not _valid_relative_path(index_value):
             issues.append(f"$.docs.currency.roles[{index}].index: invalid repository-relative path")
         if bool(role.get("states")) != bool(role.get("current_state")):
             issues.append(
@@ -884,7 +891,7 @@ def load_manifest(path: str | Path, *, schema_path: str | Path | None = None) ->
             DocumentRolePolicy(
                 name=item["name"],
                 include=tuple(item["include"]),
-                index=item["index"],
+                index=item.get("index"),
                 id_prefix_digits=item["id_prefix_digits"],
                 contract=(
                     DocumentContractPolicy(**item["contract"]) if "contract" in item else None
@@ -1021,7 +1028,7 @@ def load_manifest(path: str | Path, *, schema_path: str | Path | None = None) ->
                         DocumentRolePolicy(
                             name=item["name"],
                             include=tuple(item["include"]),
-                            index=item["index"],
+                            index=item.get("index"),
                             id_prefix_digits=item["id_prefix_digits"],
                             contract=(
                                 DocumentContractPolicy(**item["contract"])

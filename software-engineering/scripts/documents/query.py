@@ -12,11 +12,12 @@ import yaml
 
 from ..policy.document_paths import DocumentContainment, DocumentContainmentError
 from ..policy.manifest import TaskInventoryPolicy, TaskPlanningPolicy
+from .contracts import ROLE_CONTRACTS
 
 SCHEMA_VERSION = 1
 MAX_DOCUMENT_BYTES = 1_000_000
 MAX_DOCUMENTS = 2_000
-KNOWN_STATUSES = {"todo", "in_progress", "partial", "blocked", "done"}
+KNOWN_STATUSES = set(ROLE_CONTRACTS["task"].states)
 _STATUS = re.compile(r"^\s*[-*]?\s*Status\s*:\s*(.+?)\s*$", re.IGNORECASE)
 _DEPENDS = re.compile(r"^\s*[-*]?\s*Depends\s+on\s*:\s*(.+?)\s*$", re.IGNORECASE)
 _PLANNING = re.compile(r"^\s*[-*]\s+X-Planning\s*:\s*(.*?)\s*$", re.IGNORECASE)
@@ -219,7 +220,7 @@ def compact(
     }
     completed = sum(item["status"] == "done" for item in all_tasks)
     for item in tasks:
-        if item["status"] == "done":
+        if item["status"] in ROLE_CONTRACTS["task"].settled_states:
             continue
         incomplete = [
             dependency
@@ -529,9 +530,13 @@ def _expand(
                         Provenance(pattern, 1),
                     )
                 )
+                # Task 0136: the pattern already errored, so it is not a silently
+                # empty match and gets no additional warning.
                 continue
         else:
             candidates = root.glob(pattern)
+        matched = 0
+        errored = False
         for candidate in candidates:
             if not candidate.is_file():
                 continue
@@ -547,8 +552,10 @@ def _expand(
                         Provenance(candidate.relative_to(root).as_posix(), 1),
                     )
                 )
+                errored = True
                 continue
             found.add(resolved)
+            matched += 1
             if len(found) >= MAX_DOCUMENTS:
                 findings.append(
                     InventoryFinding(
@@ -559,6 +566,18 @@ def _expand(
                     )
                 )
                 return tuple(sorted(found))
+        # Task 0136: a task glob that matched nothing is a finding naming the glob
+        # and root, not a silent zero-count success. Handoff and decision globs are
+        # legitimately optional and are not flagged.
+        if kind == "task" and matched == 0 and not errored:
+            findings.append(
+                InventoryFinding(
+                    "source.empty-glob",
+                    "warning",
+                    f"task source glob {pattern!r} matched no documents under {root}",
+                    Provenance(pattern, 1),
+                )
+            )
     return tuple(sorted(found))
 
 

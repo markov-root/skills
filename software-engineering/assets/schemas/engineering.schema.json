@@ -197,7 +197,7 @@
     "document_role": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "include", "index", "id_prefix_digits"],
+      "required": ["name", "include", "id_prefix_digits"],
       "dependentRequired": {
         "states": ["current_state"],
         "current_state": ["states"]
@@ -206,7 +206,7 @@
         "name": { "$ref": "#/$defs/name" },
         "include": { "$ref": "#/$defs/nonempty_globs" },
         "index": { "$ref": "#/$defs/nonempty" },
-        "id_prefix_digits": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "id_prefix_digits": { "type": "integer", "minimum": 0, "maximum": 12 },
         "contract": { "$ref": "#/$defs/document_contract" },
         "states": {
           "type": "array",

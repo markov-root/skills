@@ -14,7 +14,11 @@ from .manifest import (
     ManifestV2,
     load_manifest,
 )
-from .project_root import load_explicit_manifest, resolve_explicit_project_root
+from .project_root import (
+    git_root_boundary,
+    load_explicit_manifest,
+    resolve_explicit_project_root,
+)
 
 IDENTITY_DOCUMENT_VERBS = frozenset(
     {
@@ -92,13 +96,23 @@ class DocumentSelection:
 
     def to_dict(self) -> dict[str, object]:
         requested_has_manifest = (self.requested_root / "engineering.yaml").is_file()
-        if not isinstance(self.manifest, ManifestV2):
+        if self.manifest is None:
             return {
                 "requested": str(self.requested_root),
                 "resolved": str(self.resolved_requested_root),
                 "promoted": self.requested_root != self.resolved_requested_root,
                 "requested_has_manifest": requested_has_manifest,
                 "strategy": "explicit",
+            }
+        if not isinstance(self.manifest, ManifestV2):
+            # Task 0136: an adopted ancestor v1 manifest is the resolved root, so
+            # report where traversal actually landed (exact v1 lands identically).
+            return {
+                "requested": str(self.requested_root),
+                "resolved": str(self.repository_root),
+                "promoted": self.requested_root != self.repository_root,
+                "requested_has_manifest": requested_has_manifest,
+                "strategy": self.strategy,
             }
         return {
             "requested": str(self.requested_root),
@@ -188,6 +202,7 @@ def _selection_from_manifest(
     *,
     verb_class: DocumentVerbClass,
     project_id: str | None,
+    strategy: str = "explicit",
 ) -> DocumentSelection:
     repository_root = manifest.path.parent
     if not isinstance(manifest, ManifestV2):
@@ -201,7 +216,7 @@ def _selection_from_manifest(
             repository_root=repository_root,
             manifest=manifest,
             verb_class=verb_class,
-            strategy="legacy-exact",
+            strategy=strategy,
         )
 
     registry_selection = select_document_projects(
@@ -238,6 +253,9 @@ def resolve_document_selection(
     requested_root = explicit.requested
     resolved_requested_root = explicit.root
 
+    # Task 0136: ancestor walks stop at the Git root so a nested repository never
+    # adopts a manifest from outside its own repository.
+    boundary = git_root_boundary(resolved_requested_root)
     exact_manifest = resolved_requested_root / "engineering.yaml"
     if exact_manifest.is_file():
         try:
@@ -254,6 +272,8 @@ def resolve_document_selection(
         )
 
     for directory in resolved_requested_root.parents:
+        if boundary is not None and not directory.is_relative_to(boundary):
+            break
         candidate = directory / "engineering.yaml"
         if not candidate.is_file():
             continue
@@ -271,14 +291,18 @@ def resolve_document_selection(
             )
         if project_id is not None:
             raise DocumentSelectionError(
-                [
-                    (
-                        "--project is unsupported for manifest v1; "
-                        "the resolver will not climb past that manifest"
-                    )
-                ]
+                [("--project is unsupported for manifest v1; use its exact project root")]
             )
-        break
+        # Task 0136: an ancestor v1 manifest IS the project, so adopt it instead of
+        # falling through to the exact-root error; the resolution reports the climb.
+        return _selection_from_manifest(
+            requested_root,
+            resolved_requested_root,
+            manifest,
+            verb_class=verb_class,
+            project_id=project_id,
+            strategy="ancestor-v1",
+        )
 
     if action in MANIFEST_OPTIONAL_DOCUMENT_VERBS and project_id is None:
         return DocumentSelection(

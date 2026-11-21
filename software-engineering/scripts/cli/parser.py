@@ -17,11 +17,15 @@ def _release_version() -> str:
 
 def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="emit one versioned JSON object")
+    parser.add_argument("--debug", action="store_true", help="print a traceback on internal errors")
     parser.add_argument(
         "--project-root",
         default=".",
         metavar="PATH",
-        help="path within the target project",
+        help=(
+            "the project directory; most commands discover an ancestor, but start/finish "
+            "require the exact adopted root (the directory containing engineering.yaml)"
+        ),
     )
 
 

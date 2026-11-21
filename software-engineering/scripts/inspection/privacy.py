@@ -232,7 +232,7 @@ def git_identity_findings(root: Path, *, target: str) -> tuple[list[ActiveFindin
                 )
             )
     data, truncated, returncode, reason = _stdout(
-        ("git", "-C", str(root), "log", "--all", "--format=%ae%x00%ce%x00"),
+        ("git", "-C", str(root), "log", "--all", "--format=%ae%x00%ce%x00%an%x00%cn%x00"),
         root=root,
         byte_limit=MAX_IDENTITY_BYTES,
         timeout=30,
@@ -242,8 +242,9 @@ def git_identity_findings(root: Path, *, target: str) -> tuple[list[ActiveFindin
     if returncode != 0:
         return findings, truncated, f"Git identity inspection exited {returncode}"
     seen: set[tuple[str, str]] = set()
+    seen_names: set[tuple[str, str, str]] = set()
     fields = data.split(b"\0")
-    for index in range(0, len(fields) - 1, 2):
+    for index in range(0, len(fields) - 3, 4):
         for identity_kind, raw_email in (
             ("author", fields[index]),
             ("committer", fields[index + 1]),
@@ -261,7 +262,35 @@ def git_identity_findings(root: Path, *, target: str) -> tuple[list[ActiveFindin
                     source="git-history",
                 )
             )
+        for identity_kind, raw_name in (
+            ("author", fields[index + 2]),
+            ("committer", fields[index + 3]),
+        ):
+            name = raw_name.decode("utf-8", "replace").strip()
+            if not name:
+                continue
+            for finding_id, message, value in _privacy_matches(name, target=target):
+                identity = (identity_kind, finding_id, value)
+                if identity in seen_names:
+                    continue
+                seen_names.add(identity)
+                findings.append(
+                    privacy_finding(
+                        finding_id,
+                        f"{message} in a Git history {identity_kind} name",
+                        value,
+                        source="git-history",
+                    )
+                )
     return findings, truncated, ""
+
+
+def _redacted_excerpt(line: str, *, target: str, limit: int = 160) -> str:
+    """Bound a commit-message line with every matched detector value masked."""
+    excerpt = " ".join(line.split())
+    for _finding_id, _message, value in _privacy_matches(line, target=target):
+        excerpt = excerpt.replace(value, "<redacted>")
+    return excerpt[:limit]
 
 
 def history_privacy_findings(root: Path, *, target: str) -> tuple[list[ActiveFinding], bool, str]:
@@ -287,12 +316,25 @@ def history_privacy_findings(root: Path, *, target: str) -> tuple[list[ActiveFin
         return [], truncated, f"Git history privacy scan exited {returncode}"
     findings: list[ActiveFinding] = []
     path: str | None = None
+    removed_path: str | None = None
     seen: set[str] = set()
     for raw_line in data.splitlines():
-        if raw_line.startswith(b"+++ b/"):
-            path = reportable_path(safe_path(root, raw_line[6:].decode("utf-8", "replace")))
+        if raw_line.startswith(b"--- "):
+            source_name = raw_line[4:].decode("utf-8", "replace")
+            removed_path = (
+                safe_path(root, source_name[2:]) if source_name.startswith("a/") else None
+            )
             continue
-        if not raw_line.startswith((b"+", b"-")) or raw_line.startswith((b"+++", b"---")):
+        if raw_line.startswith(b"+++ "):
+            target_name = raw_line[4:].decode("utf-8", "replace")
+            if target_name.startswith("b/"):
+                path = reportable_path(safe_path(root, target_name[2:]))
+            else:
+                # `+++ /dev/null`: the hunk belongs to the removed file, so keep
+                # attributing its `-` lines to the removed path.
+                path = reportable_path(removed_path)
+            continue
+        if not raw_line.startswith((b"+", b"-")):
             continue
         line = raw_line[1:].decode("utf-8", "replace")
         for finding_id, message, _value in _privacy_matches(line, target=target):
@@ -313,6 +355,50 @@ def history_privacy_findings(root: Path, *, target: str) -> tuple[list[ActiveFin
             )
             if len(findings) >= MAX_FINDINGS:
                 return findings, True, ""
+    messages, messages_truncated, messages_reason = _commit_message_findings(root, target=target)
+    findings.extend(messages)
+    return findings[:MAX_FINDINGS], truncated or messages_truncated, messages_reason
+
+
+def _commit_message_findings(root: Path, *, target: str) -> tuple[list[ActiveFinding], bool, str]:
+    """Scan commit message bodies with the content detectors; values stay redacted."""
+    data, truncated, returncode, reason = _stdout(
+        ("git", "-C", str(root), "log", "--all", "--format=%H%x00%B%x00"),
+        root=root,
+        byte_limit=MAX_HISTORY_BYTES,
+        timeout=TOOL_TIMEOUT_SECONDS,
+    )
+    if reason:
+        return [], truncated, f"Git commit-message privacy scan {reason}"
+    if returncode != 0:
+        return [], truncated, f"Git commit-message privacy scan exited {returncode}"
+    findings: list[ActiveFinding] = []
+    seen: set[str] = set()
+    fields = data.split(b"\0")
+    for index in range(0, len(fields) - 1, 2):
+        commit_id = fields[index].decode("ascii", "replace").strip()
+        body = fields[index + 1].decode("utf-8", "replace")
+        if not commit_id:
+            continue
+        for line in body.splitlines():
+            for finding_id, message, value in _privacy_matches(line, target=target):
+                identity = fingerprint(
+                    f"history-message:{finding_id}", commit_id, f"git-history:{message}:{line}"
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                excerpt = _redacted_excerpt(line, target=target)
+                findings.append(
+                    privacy_finding(
+                        finding_id,
+                        f"{message} in commit {commit_id[:12]} message: {excerpt}",
+                        value,
+                        source="git-history",
+                    )
+                )
+                if len(findings) >= MAX_FINDINGS:
+                    return findings, True, ""
     return findings, truncated, ""
 
 

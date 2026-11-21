@@ -63,6 +63,10 @@ docs/
 (Plus the usual repo-root `README.md` and `CONTRIBUTING.md` when those entry points fit the
 ecosystem.)
 
+With `engineering.yaml` v2, this layout is a docs project whose `docs_root` equals its root
+(`root: docs`, `docs_root: .`), so record folders sit directly in `docs/` rather than one level
+down. In a monorepo, per-package projects keep their own records (`<package>/dev/docs`) beside it.
+
 Reader-facing tutorials, how-to guides, and generated/reference material may receive top-level
 folders when volume warrants it. A project may instead keep user documentation beside a package,
 in a documentation site source tree, or in another indexed home required by its toolchain.
@@ -88,13 +92,11 @@ separate deliberation/research artifact when compressing them into the ADR would
 history.
 
 **`tasks/`** -- Actionable open work, one per file. ADRs record _decisions_; tasks record _work to do_.
-The filename prefix encodes provenance:
-
-| Prefix               | Means                                   | Links back to      |
-| -------------------- | --------------------------------------- | ------------------ |
-| `adr-NNNN-slug.md`   | Work a decision left to do              | `../adr/NNNN-*.md` |
-| `audit-NNNN-slug.md` | Work an audit surfaced                  | `../audits/...`    |
-| `task-NNNN-slug.md`  | Standalone work with no parent decision | (none)             |
+Every record role uses one filename shape, `NNNN-slug.md`, numbered per role and per project, which
+is what `engineering document new` allocates. Provenance is not encoded in the filename: a task
+that a decision or audit left behind names its source in frontmatter `relationships` (for example
+`derived-from` an audit, `decided-by` an ADR), so the link survives a re-scope and is queryable by
+`engineering document trace`.
 
 Each task carries an explicit Status. Repositories using the
 `engineering document query --role task` contract use
@@ -104,16 +106,21 @@ before `done`. `tasks/README.md` is the index, split by actionable and blocked s
 for oversight. Use [requirements and traceability](requirements-and-traceability.md) when criteria
 need stable identifiers or relationships beyond one task.
 
-**`lessons/`** -- `YYYY-MM-DD-slug.md` dated learnings (optionally `YYYY-MM-DD-adr-NNNN-slug.md` /
-`-task-NNNN-` when tied to one), plus _standing_ thematic notes without a date prefix (e.g.
+**`lessons/`** -- `NNNN-slug.md` dated learnings (the date lives in frontmatter `created`, the source
+record in `relationships`), plus _standing_ thematic notes without a number (e.g.
 `methodology.md`, `process-engineering.md`, `deliberately-rejected.md`). This is the reasoning that did
 not fit in an ADR, and one possible place to look when a decision seems puzzling. A project may use
 a dedicated `research/` or `deliberation/` role instead; index whichever role owns that history.
 
-**`audits/`** -- Point-in-time audit and deep-analysis bundles: `YYYY-MM-<slug>/` (a folder when it spans
-many files, with its own `00-INDEX.md`) or `YYYY-MM-DD-audit-NNNN-<slug>.md` (a single report). The full
-worked artifact as produced. Learnings distilled from an audit go to `lessons/`; work it surfaces goes to
-`tasks/` as `audit-NNNN-*`.
+**`audits/`** -- Point-in-time audit and deep-analysis reports, `NNNN-slug.md`, with any bulky
+supporting files in a sibling folder of the same stem. The full worked artifact as produced.
+Learnings distilled from an audit go to `lessons/`; work it surfaces goes to `tasks/` with a
+`derived-from` relationship to the audit.
+
+**`handoffs/`** -- Session continuation records, `NNNN-slug.md`. Exactly one is `current` per
+project and the rest are `superseded`; the validator fails a project with two
+(`currency.current-multiple`, `record.structure.handoff-ambiguous`). A repository that wants one
+continuation stream across several projects declares the `handoff` role in one project only.
 
 **`templates/`** -- Templates for new ADRs, tasks, lessons, and folder READMEs. These set the
 going-forward standard; apply them to new artifacts, not retroactively to the back catalogue.
@@ -219,9 +226,9 @@ authority that never made that decision.
 
 - Link with **relative paths**; a link-checker must be able to resolve every `.md` link from its file's
   own directory.
-- In repositories adopting this profile, **prefix-link** each derived task to its source, and give
-  each source ADR a one-line pointer back:
-  `## Open work` -> "Tracked as a task (this ADR remains the decision of record): `tasks/adr-NNNN-...`".
+- In repositories adopting this profile, link each derived task to its source through a frontmatter
+  `relationships` entry, and give each source ADR a one-line pointer back:
+  `## Open work` -> "Tracked as a task (this ADR remains the decision of record): `tasks/NNNN-...`".
 - **Do not gut an ADR to extract a task.** Duplicate the actionable item into `tasks/` and leave the
   decision, rationale, and consequences in the ADR. Consequences are part of the record, not a to-do
   list.

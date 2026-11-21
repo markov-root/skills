@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import glob
+import json
 import math
 import re
 from collections.abc import Mapping, Sequence
@@ -20,6 +21,7 @@ from yaml.tokens import AliasToken, AnchorToken, TagToken
 
 from ..policy.document_paths import DocumentContainment, DocumentContainmentError
 from ..policy.manifest import DocsCurrencyPolicy, DocsPolicy, DocumentRolePolicy
+from ..resources import template_path
 from .contracts import (
     DOCUMENT_SCHEMA_VERSION,
     GENERIC_ROLES,
@@ -107,7 +109,7 @@ class DocumentSelection:
     source: str
     role: str
     include_patterns: tuple[str, ...]
-    index: str
+    index: str | None
     registry_precedence: int
     contract_version: int
 
@@ -159,6 +161,11 @@ _UniqueKeySafeLoader.add_constructor(
 
 
 _RULES = {
+    "document.template-placeholder": (
+        "error",
+        "unfilled authoring prompts do not establish reviewed record content or ownership",
+        "fill the named section or owner and remove the quality-bar authoring comment",
+    ),
     "document.frontmatter-missing": (
         "error",
         "an adopted typed role requires colocated versioned metadata",
@@ -447,6 +454,7 @@ def validate_typed_documents(
     policy: DocsCurrencyPolicy | None,
     *,
     changed_paths: Sequence[str] = (),
+    rename_only_paths: frozenset[str] = frozenset(),
     current_date: str | None = None,
     containment: DocumentContainment | None = None,
     extra_known_identities: frozenset[str] = frozenset(),
@@ -455,6 +463,7 @@ def validate_typed_documents(
         root,
         policy,
         changed_paths=changed_paths,
+        rename_only_paths=rename_only_paths,
         current_date=current_date,
         containment=containment,
         extra_known_identities=extra_known_identities,
@@ -466,10 +475,12 @@ def validate_adopted_documents(
     policy: DocsCurrencyPolicy | None,
     *,
     changed_paths: Sequence[str] | None = None,
+    rename_only_paths: frozenset[str] = frozenset(),
     current_date: str | None = None,
     containment: DocumentContainment | None = None,
     extra_known_identities: frozenset[str] = frozenset(),
     typed_scan: DocumentScan | None = None,
+    date_changed_paths: Sequence[str] | None = None,
 ) -> tuple[DocFinding, ...]:
     """Apply currency and typed-record validation from one adopted policy input."""
     scan = (
@@ -478,7 +489,10 @@ def validate_adopted_documents(
         else scan_typed_documents(
             root,
             policy,
-            changed_paths=changed_paths or (),
+            changed_paths=(changed_paths or ())
+            if date_changed_paths is None
+            else date_changed_paths,
+            rename_only_paths=rename_only_paths,
             current_date=current_date,
             containment=containment,
             extra_known_identities=extra_known_identities,
@@ -503,14 +517,16 @@ def validate_documents(
     paths: Sequence[str],
     *,
     changed_paths: Sequence[str] | None = None,
+    rename_only_paths: frozenset[str] = frozenset(),
     current_date: str | None = None,
     containment: DocumentContainment | None = None,
     extra_known_identities: frozenset[str] = frozenset(),
     typed_scan: DocumentScan | None = None,
+    date_changed_paths: Sequence[str] | None = None,
 ) -> tuple[DocFinding, ...]:
     """Apply the complete adopted Markdown and typed-document validation contract."""
     forbidden = (r"\]\(\s*file://",) if policy.forbid_legacy_links else ()
-    return (
+    findings = (
         *validate_markdown_structure(
             root,
             paths,
@@ -521,12 +537,15 @@ def validate_documents(
             root,
             policy.currency,
             changed_paths=changed_paths,
+            rename_only_paths=rename_only_paths,
             current_date=current_date,
             containment=containment,
             extra_known_identities=extra_known_identities,
             typed_scan=typed_scan,
+            date_changed_paths=date_changed_paths,
         ),
     )
+    return findings if changed_paths is None else _ratchet_findings(findings, changed_paths)
 
 
 def _ratchet_findings(
@@ -547,8 +566,7 @@ def _ratchet_findings(
             ratcheted.append(replace(finding, severity="error", ci_blocking=True))
         else:
             ratcheted.append(replace(finding, severity="warning", ci_blocking=False))
-    # Local git changes include staged, unstaged, and untracked files. A clean CI
-    # checkout needs a future merge-base comparison to retain go-forward enforcement.
+    # The command adapter supplies base-relative plus current-worktree paths.
     return tuple(ratcheted)
 
 
@@ -574,6 +592,7 @@ def scan_typed_documents(
     policy: DocsCurrencyPolicy | None,
     *,
     changed_paths: Sequence[str] = (),
+    rename_only_paths: frozenset[str] = frozenset(),
     current_date: str | None = None,
     containment: DocumentContainment | None = None,
     extra_known_identities: frozenset[str] = frozenset(),
@@ -645,6 +664,7 @@ def scan_typed_documents(
 
     by_source = {item.record.source: item for item in extracted}
     for item in extracted:
+        _validate_placeholders(item, findings)
         _validate_body(
             root,
             item,
@@ -655,8 +675,10 @@ def scan_typed_documents(
     if current_date is not None:
         changed = set(changed_paths)
         for item in extracted:
+            # A pure rename (git R100) moves a record without changing it; its date stays.
             if (
                 item.record.source in changed
+                and item.record.source not in rename_only_paths
                 and _record_is_valid(item)
                 and str(item.record.metadata["updated"]) < current_date
             ):
@@ -707,7 +729,7 @@ def _expand_role(
     if containment is not None:
         return _expand_contained_role(containment, declaration, findings)
     found: dict[Path, list[str]] = {}
-    index = (root / declaration.index).resolve()
+    index = (root / declaration.index).resolve() if declaration.index is not None else None
     for pattern in declaration.include:
         for candidate in root.glob(pattern):
             if not candidate.is_file():
@@ -725,14 +747,14 @@ def _expand_role(
                     )
                 )
                 continue
-            if resolved == index:
+            if index is not None and resolved == index:
                 continue
             found.setdefault(resolved, []).append(pattern)
             if len(found) >= MAX_DOCUMENTS:
                 findings.append(
                     _finding(
                         "document.source-truncated",
-                        declaration.index,
+                        declaration.index or pattern,
                         1,
                         f"typed document scan stopped at {MAX_DOCUMENTS} documents",
                     )
@@ -748,17 +770,21 @@ def _expand_contained_role(
 ) -> tuple[tuple[Path, tuple[str, ...]], ...]:
     found: dict[Path, list[str]] = {}
     try:
-        index = _require_contained_document_path(
-            containment,
-            declaration.index,
-            purpose=f"{declaration.name} role index",
-            must_exist=False,
+        index = (
+            _require_contained_document_path(
+                containment,
+                declaration.index,
+                purpose=f"{declaration.name} role index",
+                must_exist=False,
+            )
+            if declaration.index is not None
+            else None
         )
     except DocumentContainmentError as exc:
         findings.append(
             _finding(
                 "document.source-outside-root",
-                declaration.index,
+                declaration.index or declaration.include[0],
                 1,
                 str(exc),
             )
@@ -788,14 +814,14 @@ def _expand_contained_role(
             )
             continue
         for resolved in candidates:
-            if resolved == index:
+            if index is not None and resolved == index:
                 continue
             found.setdefault(resolved, []).append(pattern)
             if len(found) >= MAX_DOCUMENTS:
                 findings.append(
                     _finding(
                         "document.source-truncated",
-                        declaration.index,
+                        declaration.index or pattern,
                         1,
                         f"typed document scan stopped at {MAX_DOCUMENTS} documents",
                     )
@@ -1004,16 +1030,17 @@ def _extract_v1(
                 f"expected role {declaration.contract.role!r}, found {metadata.get('role')!r}",
             )
         )
-    identifier = path.name[: declaration.id_prefix_digits]
-    if str(metadata.get("id")) != identifier:
-        findings.append(
-            _finding(
-                "document.filename-id-mismatch",
-                source,
-                2,
-                f"metadata ID {metadata.get('id')!r} does not match filename prefix {identifier!r}",
+    if declaration.id_prefix_digits:
+        identifier = path.name[: declaration.id_prefix_digits]
+        if str(metadata.get("id")) != identifier:
+            findings.append(
+                _finding(
+                    "document.filename-id-mismatch",
+                    source,
+                    2,
+                    f"metadata ID {metadata.get('id')!r} does not match filename prefix {identifier!r}",
+                )
             )
-        )
     if list(metadata_validator().iter_errors(metadata)):
         # The shared validator emits the stable, field-specific findings after all extraction.
         pass
@@ -1190,16 +1217,17 @@ def _extract_v2(
                     f"top-level {field} {loaded.get(field)!r} must equal engineering_document.{field} {metadata.get(field)!r}",
                 )
             )
-    identifier = path.name[: declaration.id_prefix_digits]
-    if str(loaded.get("id")) != identifier:
-        findings.append(
-            _finding(
-                "document.filename-id-mismatch",
-                source,
-                _top_level_key_line(raw, "id"),
-                f"metadata ID {loaded.get('id')!r} does not match filename prefix {identifier!r}",
+    if declaration.id_prefix_digits:
+        identifier = path.name[: declaration.id_prefix_digits]
+        if str(loaded.get("id")) != identifier:
+            findings.append(
+                _finding(
+                    "document.filename-id-mismatch",
+                    source,
+                    _top_level_key_line(raw, "id"),
+                    f"metadata ID {loaded.get('id')!r} does not match filename prefix {identifier!r}",
+                )
             )
-        )
     return ExtractedDocument(
         DocumentContractRecord(source, metadata),
         loaded,
@@ -1278,6 +1306,52 @@ def _json_compatible(value: Any) -> bool:
 def _record_is_valid(item: ExtractedDocument) -> bool:
     validator = metadata_validator() if item.record_role else core_metadata_validator()
     return not list(validator.iter_errors(item.record.metadata))
+
+
+def _validate_placeholders(item: ExtractedDocument, findings: list[RoleFinding]) -> None:
+    """Check declared literal authoring markers, never infer whether prose is finished."""
+    if not item.record_role or item.record.metadata.get("state") == "draft":
+        return
+    role = str(item.record.metadata.get("role", ""))
+    if role not in RECORD_ROLES:
+        return
+    template = template_path(f"{role}.md").read_text(encoding="utf-8")
+    declaration = re.search(r"<!-- engineering-placeholder-markers: (.+?) -->", template)
+    if declaration is None:
+        return
+    markers = json.loads(declaration[1])
+    visible = re.sub(r"<!--.*?-->", "", item.body, flags=re.DOTALL)
+    normalized = " ".join(visible.split())
+    authority = item.record.metadata.get("authority")
+    owner = authority.get("owner") if isinstance(authority, Mapping) else None
+    state = item.record.metadata.get("state")
+    for section, marker in markers.items():
+        if section == "Completion evidence" and state != "done":
+            # The template asks open work to keep this placeholder until evidence exists.
+            continue
+        remains = (
+            owner == marker or item.core.get("owner") == marker
+            if section == "Owner"
+            else " ".join(marker.split()) in normalized
+        )
+        if remains:
+            findings.append(
+                _finding(
+                    "document.template-placeholder",
+                    item.record.source,
+                    item.body_line,
+                    f"{section}: unfilled template placeholder; replace with reviewed content",
+                )
+            )
+    if "<!-- Quality bar" in item.body:
+        findings.append(
+            _finding(
+                "document.template-placeholder",
+                item.record.source,
+                item.body_line,
+                "Quality bar: remove the authoring prompt after completing the record",
+            )
+        )
 
 
 def _validate_body(
@@ -1535,6 +1609,8 @@ def _research_source_register_candidates(
     root: Path,
     declaration: DocumentRolePolicy,
 ) -> tuple[Path, ...]:
+    if declaration.index is None:
+        return ()
     index_parent = (root / declaration.index).parent
     return (
         (index_parent / "source-register.md").resolve(),
@@ -1573,6 +1649,8 @@ def _validate_index_states(
 ) -> None:
     for declaration in declarations.values():
         if not declaration.states:
+            continue
+        if declaration.index is None:
             continue
         candidate = root / declaration.index
         try:

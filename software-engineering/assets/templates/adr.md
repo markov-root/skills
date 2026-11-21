@@ -35,6 +35,8 @@ engineering_document:
 
 # ADR NNNN: Decision
 
+<!-- engineering-placeholder-markers: {"Owner": "DECISION OWNER", "Context": "Forces, constraints, and the decision required. Link detailed research instead of copying it.", "Decision": "The chosen direction and its bounded authority.", "Consequences": "Benefits, costs, responsibilities, compatibility effects, and revisit triggers.", "Alternatives considered": "Concise rejected options and why. Keep extensive evidence, uncertainty, and open questions in a\nresearch record."} -->
+
 <!-- Quality bar — write to the ADR content standard
 the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #adr):
 one architecturally significant decision, named decider and authority · contestable premise set ·

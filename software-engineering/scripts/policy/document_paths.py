@@ -171,8 +171,8 @@ class DocumentContainment:
             raise DocumentContainmentError(
                 "workspace_root must resolve strictly inside repository_root"
             )
-        if docs == workspace or not _is_within(docs, workspace):
-            raise DocumentContainmentError("docs_root must resolve strictly inside workspace_root")
+        if not _is_within(docs, workspace):
+            raise DocumentContainmentError("docs_root must resolve inside workspace_root")
         if not _samefile(repository_lexical, repository):
             raise DocumentContainmentError(
                 "repository_root does not identify its resolved directory"

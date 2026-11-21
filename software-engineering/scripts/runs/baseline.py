@@ -70,20 +70,34 @@ class FinalRecord:
 
 
 def fingerprint_paths(root: Path, paths: Sequence[str]) -> str:
-    """Hash path names and contents without following files outside *root*."""
+    """Hash path names and contents without following files outside *root*.
+
+    Names are hashed with surrogateescape so non-UTF-8 repository filenames
+    round-trip instead of aborting the fingerprint. A symlink whose target
+    resolves outside *root* is recorded by its link text (never followed);
+    regular file contents are hashed as a stream, not read whole into memory.
+    """
     root = root.resolve()
     digest = hashlib.sha256()
     for name in sorted(set(paths)):
-        candidate = (root / name).resolve()
-        try:
-            candidate.relative_to(root)
-        except ValueError as exc:
-            raise BaselineError(f"path escapes project root: {name}") from exc
-        digest.update(name.encode())
+        digest.update(name.encode("utf-8", "surrogateescape"))
         digest.update(b"\0")
-        if candidate.is_file():
-            digest.update(candidate.read_bytes())
-        elif candidate.exists():
+        candidate = root / name
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            if candidate.is_symlink():
+                digest.update(b"<external-symlink>")
+                digest.update(os.readlink(candidate).encode("utf-8", "surrogateescape"))
+                digest.update(b"\0")
+                continue
+            raise BaselineError(f"path escapes project root: {name}") from None
+        if resolved.is_file():
+            with resolved.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1_048_576), b""):
+                    digest.update(chunk)
+        elif resolved.exists():
             digest.update(b"<non-file>")
         else:
             digest.update(b"<missing>")

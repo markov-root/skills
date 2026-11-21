@@ -112,7 +112,7 @@ def backfill_document(
         existing_id
         or (
             _configured_numeric_id(root, target, declaration)
-            if declaration is not None
+            if declaration is not None and declaration.id_prefix_digits
             else _slug(resolved_title)
         )
     )

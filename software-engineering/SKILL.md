@@ -16,7 +16,7 @@ description: >-
 license: Apache-2.0
 metadata:
   author: markov-root
-  version: "0.11.3"
+  version: "0.13.2"
 ---
 
 # software-engineering
@@ -49,10 +49,11 @@ invocation below. Quote the resolved root so installation paths containing space
 Keep the caller's working directory. PATH installation and skill-manager are optional;
 these instructions work with an ordinary skills.sh installation too.
 
-Preferred command: `engineering`. Bundled fallback:
+Preferred command: `engineering`. Bundled fallback (a launcher around `uv run --script
+"<skill-root>/scripts/engineering.py"` that also works when the uv cache is read-only):
 
 ```sh
-uv run --script "<skill-root>/scripts/engineering.py" inspect
+"<skill-root>/scripts/engineering" inspect
 ```
 
 Examples below use `engineering` as shorthand for the verified PATH command or that
@@ -69,8 +70,11 @@ bundled invocation with the same arguments. The CLI release identity comes from 
   or packages when environment policy permits; the adjacent script lock guides dependency
   resolution but the ordinary invocation may update it when necessary.
 - Preserve uv's configured cache policy, including an explicit `UV_CACHE_DIR`. Read-only cache
-  access can fail before Python entry. Report the exact diagnostic and request the appropriate
-  operator action; this skill ships no temporary-cache fallback of its own.
+  access can fail before Python entry. The bundled `scripts/engineering` launcher then reuses the
+  newest environment already in the uv cache whose packages match `engineering.py.lock`; it creates
+  no temporary cache and installs nothing. If no such environment exists it replays uv's diagnostic
+  with the prerequisite: run once with a writable cache, or set `ENGINEERING_PYTHON` to a prepared
+  interpreter. Report that diagnostic and request the operator action.
 
 ## Workflow
 
@@ -81,7 +85,10 @@ bundled invocation with the same arguments. The CLI release identity comes from 
    expands the work—reassess the whole active task using the routing table below. Do not let a stream
    of individually small instructions reset accumulated file surface, public/deployment effects,
    risk, or verification burden. Turn count and file count are observations, not universal
-   thresholds; repeated bounded mechanical edits may remain trivial.
+   thresholds; repeated bounded mechanical edits may remain trivial. Keep it light for work that
+   ships no code or contract: a design note, a docs-only repository, a throwaway script outside
+   any repository, or an already-scoped single edit needs authority, the relevant knowledge, and
+   evidence for any claim—not `start`/`finish`, adoption, or a document ceremony.
 3. **Load selectively.** Read only the knowledge files needed for this decision. Prefer two or three;
    widen only when the change genuinely crosses domains.
 4. **Define the change.** State the goal, observable acceptance criteria, in-scope and out-of-scope
@@ -99,6 +106,21 @@ bundled invocation with the same arguments. The CLI release identity comes from 
    between individually correct components. Review the whole diff for accidental changes, weakened
    tests, secrets, generated-file drift, and contract changes. Passing checks are evidence, not a
    substitute for this semantic and system-level review.
+
+   **Automated diff review (open-code-review).** Before reporting completion, get a second reader
+   on the diff through OCR's own skills: `open-code-review-delegate` by default (OCR selects files
+   and rules, your own model reviews, nothing extra leaves the machine), or `open-code-review`
+   (native pipeline) when the repository or user has approved an OCR provider. Use only a provider the
+   user approved (for example a ChatGPT-plan sign-in: `ocr auth login --provider chatgpt`, then
+   `ocr config set provider chatgpt`); never route OCR through Claude subscription credentials. Where those skills
+   conflict with this one, this one wins: do not install or upgrade `ocr` yourself (ask the
+   operator), do not drop findings silently (report which you fixed, which you rejected and why),
+   and apply fixes only within the task's scope. A confirmed finding outside the task's scope
+   becomes a task record (`engineering document new task`, or the repository's own tracker), not
+   just a line in your report. After native OCR runs, `scripts/reviewers/ocr_usage.py` appends
+   their time and token use to the user's OCR ledger. If `ocr` or the skills are unavailable, say so. To
+   record OCR in `finish`, declare the bundled `scripts/reviewers/ocr_adapter.py` as a reviewer
+   (`engineering explain adapter.semantic-reviewer`).
 8. **Report evidence.** Report files and behavior changed, acceptance evidence, commands and
    results, baseline failures still present, skipped checks, assumptions, and residual risks.
 
@@ -148,6 +170,10 @@ acceptance is unclear. When authoring or reconciling guidance, also read the
 ## Authority and calibration
 
 - Follow project `AGENTS.md`, accepted ADRs, and calibrated `CONTRIBUTING.md` before house preferences.
+  This includes this skill's own tools: when a repository says to author records another way (for
+  example, copying a template by hand instead of `engineering document new`), follow the repository.
+- In a worktree or sandbox, run commands from the repository root with root-relative paths rather
+  than `cd` chains, and do not reformat inherited files your change did not need to touch.
 - Treat knowledge documents as decision support; promote a principle into project policy explicitly.
 - Security, privacy, data integrity, and truthful verification retain risk-proportionate minimum
   floors even when a project ranks them lower.
@@ -238,3 +264,7 @@ Follow-up work:
 
 For a review-only task, replace “Files changed” with “Files inspected” and lead with prioritized
 findings.
+
+When you record feedback about this skill with `skill-feedback`, pass
+`--skill-version "$(engineering --version | cut -d' ' -f2)"` so the note stays attributable to the
+release that produced it, even if an installed copy has drifted.

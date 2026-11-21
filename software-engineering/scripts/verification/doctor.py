@@ -24,6 +24,7 @@ from ..project.health import (
     inspect_project_templates,
     inspect_reviewer_health,
 )
+from .artifact import artifact_identity
 from .fitness import from_manifest as fitness_from_manifest
 from .fitness import validate_fitness
 from .generated import from_manifest as generated_from_manifest
@@ -64,8 +65,19 @@ def diagnose(root: Path, manifest: Manifest, start: str | Path, *, ci: bool) -> 
             "docs",
             "templates",
             "policy",
+            "artifact",
         )
     }
+    for message in artifact_identity()["drift"]:
+        groups["artifact"].append(
+            Finding(
+                "artifact.install-drift",
+                "warning",
+                message,
+                "a stale installed copy runs older behaviour than the released source",
+                "relink the install to the canonical artifact or reinstall it",
+            )
+        )
     for item in discover_instructions(project, start):
         if item.drift:
             groups["instructions"].append(

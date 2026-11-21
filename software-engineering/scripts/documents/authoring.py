@@ -64,10 +64,20 @@ def allocate_document(
     random_hex: str | None = None,
     docs_root: Path | None = None,
 ) -> DocumentAllocation:
-    """Create exactly one fully rendered role template without overwriting a path."""
+    """Create one record after reserving its number in this shared directory.
+
+    Reservations coordinate processes in one filesystem checkout. Separate branch
+    worktrees allocate independently and still need duplicate-ID review at merge.
+    An interrupted process can leave a reservation; later allocators skip that ID.
+    """
     root = root.resolve()
     containment = _project_containment(root, docs_root)
     declaration = _declaration(policy, role)
+    if declaration.index is None:
+        raise ValueError(
+            f"role {role!r} adopts no index; document new requires an adopted role "
+            "index as its allocation anchor"
+        )
     _allocation_directory(root, declaration, containment=containment)
     moment = (now or datetime.now(UTC)).astimezone(UTC)
     selected_title = (title or f"New {_ROLE_LABELS[role]}").strip()
@@ -82,6 +92,19 @@ def allocate_document(
             "document UID random suffix must be eight lowercase hexadecimal characters"
         )
     template = _template(role)
+
+    if declaration.id_prefix_digits == 0:
+        return _allocate_unnumbered(
+            root,
+            declaration,
+            role,
+            slug,
+            suffix,
+            selected_title,
+            moment,
+            template,
+            containment=containment,
+        )
 
     next_number = _next_number(root, declaration, containment=containment)
     limit = (10**declaration.id_prefix_digits) - 1
@@ -107,10 +130,24 @@ def allocate_document(
             )
         uid = f"{role}-{moment:%Y%m%dT%H%M%S%fZ}-{suffix}"
         rendered = _render(template, role, document_id, uid, selected_title, moment)
+        reservation = target.parent / f".engineering-{role}-{identifier}.reserve"
         try:
-            _write_exclusive(target, rendered)
+            descriptor = os.open(reservation, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
             continue
+        try:
+            os.close(descriptor)
+            # A peer may have completed and removed its reservation since our
+            # initial scan. Recheck while holding this numeric claim, regardless
+            # of the peer's title/filename, before making the new record visible.
+            if _next_number(root, declaration, containment=containment) > number:
+                continue
+            try:
+                _write_exclusive(target, rendered)
+            except FileExistsError:
+                continue
+        finally:
+            reservation.unlink(missing_ok=True)
         return DocumentAllocation(
             role,
             document_id,
@@ -122,6 +159,53 @@ def allocate_document(
             "unverified" if role in RECORD_ROLES else None,
         )
     raise ValueError(f"role {role!r} allocation collided {MAX_ALLOCATION_ATTEMPTS} times")
+
+
+def _allocate_unnumbered(
+    root: Path,
+    declaration: DocumentRolePolicy,
+    role: str,
+    slug: str,
+    suffix: str,
+    selected_title: str,
+    moment: datetime,
+    template: str,
+    *,
+    containment: DocumentContainment | None = None,
+) -> DocumentAllocation:
+    """Allocate an unnumbered role: the title slug is the role-local identity."""
+    document_id = slug
+    relative = (Path(declaration.index).parent / f"{slug}.md").as_posix()
+    if not matches_any(relative, declaration.include):
+        raise ValueError(
+            f"allocator path {relative!r} is not selected by role {role!r} include patterns"
+        )
+    target = root / relative
+    if containment is not None:
+        target = containment.require_project_path(
+            target,
+            purpose=f"{role} allocation target",
+            must_exist=False,
+        )
+    uid = f"{role}-{moment:%Y%m%dT%H%M%S%fZ}-{suffix}"
+    rendered = _render(template, role, document_id, uid, selected_title, moment)
+    try:
+        _write_exclusive(target, rendered)
+    except FileExistsError as exc:
+        raise ValueError(
+            f"document {relative!r} already exists; unnumbered roles derive their "
+            "identity from the title slug, so supply a distinct title"
+        ) from exc
+    return DocumentAllocation(
+        role,
+        document_id,
+        uid,
+        selected_title,
+        relative,
+        moment.date().isoformat(),
+        moment.date().isoformat(),
+        "unverified" if role in RECORD_ROLES else None,
+    )
 
 
 def _declaration(
@@ -227,7 +311,9 @@ def _render(
     rendered = template
     rendered = re.sub(
         r"^summary: .+$",
-        f"summary: {json.dumps(allocation_summary(_ROLE_LABELS[role], title), ensure_ascii=False)}",
+        lambda _: (
+            f"summary: {json.dumps(allocation_summary(_ROLE_LABELS[role], title), ensure_ascii=False)}"
+        ),
         rendered,
         count=1,
         flags=re.MULTILINE,
@@ -248,7 +334,7 @@ def _render(
     )
     rendered = re.sub(
         r"^title: .+$",
-        f"title: {json.dumps(title, ensure_ascii=False)}",
+        lambda _: f"title: {json.dumps(title, ensure_ascii=False)}",
         rendered,
         count=1,
         flags=re.MULTILINE,
@@ -263,7 +349,7 @@ def _render(
         )
         rendered = re.sub(
             r"^  title: .+$",
-            f"  title: {json.dumps(title, ensure_ascii=False)}",
+            lambda _: f"  title: {json.dumps(title, ensure_ascii=False)}",
             rendered,
             count=1,
             flags=re.MULTILINE,
@@ -277,7 +363,7 @@ def _render(
     if role in RECORD_ROLES:
         rendered = re.sub(
             rf"^# {_ROLE_LABELS[role]} NNNN: .+$",
-            f"# {_ROLE_LABELS[role]} {identifier}: {title}",
+            lambda _: f"# {_ROLE_LABELS[role]} {identifier}: {title}",
             rendered,
             count=1,
             flags=re.MULTILINE,
@@ -285,7 +371,7 @@ def _render(
     else:
         rendered = re.sub(
             rf"^# {_ROLE_LABELS[role]}: TITLE$",
-            f"# {_ROLE_LABELS[role]}: {title}",
+            lambda _: f"# {_ROLE_LABELS[role]}: {title}",
             rendered,
             count=1,
             flags=re.MULTILINE,

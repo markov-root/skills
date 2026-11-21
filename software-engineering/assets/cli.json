@@ -2,8 +2,8 @@
   "schema_version": 1,
   "commands": {
     "engineering": {
-      "runner": "uv",
-      "path": "scripts/engineering.py"
+      "runner": "exec",
+      "path": "scripts/engineering"
     }
   }
 }

@@ -46,6 +46,8 @@ engineering_document:
 
 # Task NNNN: Title
 
+<!-- engineering-placeholder-markers: {"Owner": "OWNER", "Problem": "What observable gap exists, for whom, and why it matters.", "Scope": "What this task is authorized to change.", "Out of scope": "What remains separate.", "Done when": "- AC-1: Observable, bounded acceptance condition.", "Completion evidence": "Keep empty until evidence exists. Before changing state to `done`, link the implementation, checks,\nrecords, and limitations that satisfy each criterion."} -->
+
 <!-- Quality bar — write to the Task content standard
 the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #task):
 objective, independently judgeable acceptance criteria, honest scope and non-goals, criterion-linked

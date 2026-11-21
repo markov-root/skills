@@ -11,6 +11,7 @@ from ..inspection import (
     render_inspection,
     run_active_inspection,
 )
+from ..verification.artifact import artifact_identity, render_artifact
 from .contracts import (
     EXIT_CHECK_FAILED,
     EXIT_OK,
@@ -87,7 +88,19 @@ def handle(args: argparse.Namespace) -> CommandResult:
             "failed": EXIT_CHECK_FAILED,
             "unavailable": EXIT_UNAVAILABLE,
         }.get(report["status"], EXIT_OK)
-        return CommandResult(report["status"], root, data, code, render_active_inspection(report))
+        human = render_active_inspection(report)
+        unavailable_reasons = tuple(
+            layer.get("reason")
+            for layer in report.get("layers", ())
+            if isinstance(layer, dict)
+            and layer.get("status") == "unavailable"
+            and layer.get("reason")
+        )
+        if report["status"] == "unavailable" and unavailable_reasons:
+            human += "\n\n## Unavailable reasons\n\n" + "\n".join(
+                f"- {reason}" for reason in unavailable_reasons
+            )
+        return CommandResult(report["status"], root, data, code, human)
     if args.target != "generic" or args.offline or args.dependency_evidence:
         raise ValueError(
             "--target, --offline, and --dependency-evidence require an active inspect profile"
@@ -99,7 +112,10 @@ def handle(args: argparse.Namespace) -> CommandResult:
     )
     root = Path(report["root"])
     data = {key: value for key, value in report.items() if key not in {"schema_version", "root"}}
-    return CommandResult("passed", root, data, EXIT_OK, render_inspection(report))
+    identity = artifact_identity()
+    data["artifact"] = identity
+    human = "\n".join((render_inspection(report).rstrip(), "", *render_artifact(identity)))
+    return CommandResult("passed", root, data, EXIT_OK, human)
 
 
 SPEC = CommandSpec(

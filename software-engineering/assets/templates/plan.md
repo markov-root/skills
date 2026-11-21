@@ -35,6 +35,8 @@ engineering_document:
 
 # Plan NNNN: Execution plan
 
+<!-- engineering-placeholder-markers: {"Owner": "PLAN OWNER", "Objective": "The outcome this plan executes and the task(s) or programme it advances. One paragraph; link the\ndriving task/ADR by identifier.", "Approach": "The ordered decomposition into small, independently checkpointable steps. Keep each step bankable —\ncompleting it should leave verifiable evidence in the environment, not only in memory.", "Progress log": "Append-only, dated checkpoint entries (newest last). Each entry records what was completed, the\nevidence (commit, test run, file), and any decision made. This is the durable bank of progress.", "Current state": "Where execution stands right now: the last completed checkpoint and the exact resume point. Keep\nthis section rewritten to the present so a cold reader can resume without the conversation.", "Next steps": "The remaining ordered steps and the immediate next action. Do not silently broaden scope beyond the\nObjective."} -->
+
 <!-- Quality bar — write to the Plan content standard
 the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #plan):
 objective and the task(s) it executes · small, independently bankable checkpoints · append-only

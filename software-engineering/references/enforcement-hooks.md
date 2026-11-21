@@ -15,9 +15,14 @@ code/build-file edit until the skill has been consulted this session. Same idea 
   skill has **not** been consulted this session. Prose docs (`.md/.txt/.rst`) and data are not gated.
   Extend the gated set per-invocation with `SE_GATE_EXTS="*.tf *.proto"`; disable entirely with
   `SE_GATE_DISABLE=1` (audit only).
-- **Consulted** = the session transcript shows the `software-engineering` Skill was invoked or its
-  `engineering.py` CLI ran. Detected once, then cached at
-  `${XDG_CACHE_HOME:-~/.cache}/se-consult-gate/<session_id>.ok` so later edits are a file-exists check.
+- **Consulted** = the session transcript (or, for a subagent, its parent's; for a parent, any of
+  its subagents') contains a structured `tool_use` entry: the Skill tool invoked with
+  `software-engineering`, or a Bash call running the engineering CLI (`engineering.py` or the
+  `engineering` launcher). Prose, tool results and hook messages never count. Since 0.13.0 the
+  file classes and this detection live in `scripts/se_gate_shared.py`, shared by every dialect.
+  Detected once, then cached at `${XDG_CACHE_HOME:-~/.cache}/se-consult-gate/<session_id>.ok`
+  (sanitised id) so later edits are a file-exists check. File-extension matching is
+  case-insensitive. An absent or unreadable transcript allows (fail-open).
 - **Fail-open by construction:** the only non-allow path is the positive "code file AND not
   consulted" decision. Any error, missing field, unparseable stdin, or absent transcript → allow. A
   bug cannot brick editing.

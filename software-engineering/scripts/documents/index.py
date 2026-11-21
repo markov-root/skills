@@ -142,7 +142,7 @@ def show_document(
 ) -> dict[str, Any]:
     matches = _matches(index.entries, identifier)
     if not matches:
-        raise KeyError(f"unknown document identifier: {identifier}")
+        raise ValueError(f"unknown document identifier: {identifier}")
     if len(matches) > 1:
         choices = ", ".join(item["id"] for item in matches)
         raise ValueError(f"ambiguous document identifier {identifier!r}: {choices}")
@@ -191,14 +191,15 @@ def _source_fingerprints(
     for declaration in policy.roles:
         if declaration.contract is None:
             continue
-        index = (root / declaration.index).resolve()
-        _add_source_fingerprint(
-            selected,
-            root,
-            index,
-            role=declaration.name,
-            kind="role-index",
-        )
+        index = (root / declaration.index).resolve() if declaration.index is not None else None
+        if index is not None:
+            _add_source_fingerprint(
+                selected,
+                root,
+                index,
+                role=declaration.name,
+                kind="role-index",
+            )
         if declaration.contract.role == "research":
             for register in _source_register_candidates(root, declaration):
                 _add_source_fingerprint(
@@ -216,7 +217,7 @@ def _source_fingerprints(
                     resolved = candidate.resolve()
                 except (OSError, RuntimeError, ValueError):
                     continue
-                if resolved == index:
+                if index is not None and resolved == index:
                     continue
                 _add_source_fingerprint(
                     selected,
@@ -265,18 +266,23 @@ def _contained_source_fingerprints(
     for declaration in policy.roles:
         if declaration.contract is None:
             continue
-        index = containment.require_project_path(
-            declaration.index,
-            purpose=f"{declaration.name} role index fingerprint",
-            must_exist=False,
+        index = (
+            containment.require_project_path(
+                declaration.index,
+                purpose=f"{declaration.name} role index fingerprint",
+                must_exist=False,
+            )
+            if declaration.index is not None
+            else None
         )
-        _add_source_fingerprint(
-            selected,
-            root,
-            index,
-            role=declaration.name,
-            kind="role-index",
-        )
+        if index is not None:
+            _add_source_fingerprint(
+                selected,
+                root,
+                index,
+                role=declaration.name,
+                kind="role-index",
+            )
         if declaration.contract.role == "research":
             for register in _source_register_candidates(root, declaration):
                 try:
@@ -298,7 +304,7 @@ def _contained_source_fingerprints(
                 pattern,
                 purpose=f"{declaration.name} document fingerprint",
             ):
-                if candidate == index:
+                if index is not None and candidate == index:
                     continue
                 _add_source_fingerprint(
                     selected,
@@ -311,6 +317,8 @@ def _contained_source_fingerprints(
 
 
 def _source_register_candidates(root: Path, declaration: Any) -> tuple[Path, ...]:
+    if declaration.index is None:
+        return ()
     index_parent = (root / declaration.index).parent
     return tuple((index_parent / candidate).resolve() for candidate in SOURCE_REGISTER_CANDIDATES)
 

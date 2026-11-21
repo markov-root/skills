@@ -2,6 +2,58 @@
 
 This changelog records changes to the installable `software-engineering` Agent Skill artifact.
 
+## 0.13.2 — 2026-11-21
+
+- `scripts/reviewers/ocr_usage.py` keeps a ledger of every OCR run from OCR's own session files (time, model, prompt/completion/cache tokens, comments), plus the Codex weekly usage reading when it is fresh; OCR itself does not report plan percentages. Step 7 also says confirmed out-of-scope OCR findings become task records.
+- Document role policy accepts `id_prefix_digits: 0` for unnumbered, slug-named roles and makes a role's `index` optional (absent means no registration findings); `document new` and `backfill` derive slug identities for unnumbered roles. The ~/Skills portfolio manifest now treats skill knowledge and reference pages this way (part of task 0144).
+- `inspect` no longer crashes on a manifest whose document role declares no index (found by the CLI review before 0.13.2 was pushed).
+
+## 0.13.1 — 2026-11-21
+
+- The open-code-review adapter allowlists only `chatgpt` (the ChatGPT-plan sign-in) by default; API-key providers such as `anthropic`, `openai` and `openrouter` are refused unless a project passes `--allow-provider`. SKILL.md names the approved provider and rules out Claude subscription credentials for OCR (task 0140).
+- Step 7 now routes to OCR's own skills, `open-code-review-delegate` (default; host model, no extra egress) and `open-code-review` (native, approved provider), and states where this skill overrides them: no self-installing `ocr`, no silently dropped findings, fixes only within scope.
+- Live OCR pilot fixes (five reviews of this release's commits): the adapter accepts ocr's real `complete` status and keeps reviews with omissions partial even when they have findings; the launcher never writes to a predictable temp path and refuses `requires-python` bounds it cannot evaluate; the gate allows when a related transcript is unreadable and ignores markers written by the 0.12 detector; `inspect` and `doctor` tolerate an undecodable or dangling installed copy (tasks 0140, 0102, 0118, 0135).
+
+## 0.13.0 — 2026-11-21
+
+Self-audit release (audit 0014). Fixes first; every item has a regression test that failed before the change.
+
+**Gate and hooks**
+- The pre-edit consultation gate counts only structured tool calls (the Skill tool with `software-engineering`, or a Bash call running the engineering CLI). Its own block message, prose and tool results no longer satisfy it. It recognises subagent and parent transcripts, matches extensions case-insensitively (adds `.ipynb`, `.tf`, CI YAML, `Dockerfile.*`), sanitises session ids, and shares one file-class source across all hook dialects. An absent or unreadable transcript now allows (fail-open) instead of blocking (task 0118).
+- `install-hooks --apply` writes through symlinked settings files and preserves their mode (task 0131).
+
+**Lifecycle and CLI**
+- `start` without `--paths` scopes the run to the whole project instead of guaranteeing a failed `finish`; a failed `finish` can be re-run after fixing the problem; `--project-root` help and errors name the real root (task 0123).
+- Exit codes are truthful: internal errors exit 70 (`--debug` shows the traceback) instead of posing as invalid policy (2), baseline incompatibility (5) or a failed check (1); unmapped statuses fail closed (task 0124).
+- Human output names each failing check with its exit code and output tail, and prints why `inspect` was unavailable (task 0119).
+- `inspect` shows the running skill version and path; `doctor` warns when another installed copy, or `ENGINEERING_SOURCE_ROOT`, has a different version (task 0135).
+- A bundled launcher, `scripts/engineering`, now fronts every invocation (and the PATH command, via `assets/cli.json`). It runs `uv run --script` as before. When the uv cache is read-only and uv fails before Python starts, it reuses the newest cached environment whose packages exactly match `engineering.py.lock`; it never creates a temporary cache or installs anything. `ENGINEERING_PYTHON` selects a prepared interpreter explicitly. A command that started is never re-run, and its stderr is always passed through (task 0102; the most-reported friction, 49 of 140 recent notes).
+- Bytecode is cached under `$XDG_CACHE_HOME/software-engineering/pycache` (never inside the skill), cutting warm `--help`/`--version` from ~0.76 s to ~0.33 s (task 0134).
+- `start` tolerates non-UTF-8 untracked filenames and dirty symlinks that point outside the repository (task 0133).
+
+**Documents**
+- `document validate [PATH ...]` validates explicit files, keeps the cross-document findings they take part in, and reports skipped scope (task 0120).
+- `document validate` ratchets against `--base REF`, defaulting to the merge base with the default branch, so records broken in committed changes block on a clean checkout or in CI. Inherited findings stay advisory and are counted. Without a discoverable base it reports a strict all-documents fallback (task 0125).
+- Non-draft records that still contain declared template placeholders (`owner: OWNER`, unfilled sections, the quality-bar comment) are reported; an open task may keep the completion-evidence placeholder until it claims `done` (task 0126).
+- Task states are shared between `query` and `validate`; `superseded` is recognised and a terminal `declined` state requires `details.rationale` (task 0121).
+- `document new` keeps backslashes, `$`, `&` and other special characters in titles literally instead of crashing (task 0122), and reserves numeric ids atomically so parallel allocations in one checkout get distinct ids (task 0129).
+- Commands run from a nested directory use the nearest ancestor `engineering.yaml` (stopping at the Git root) and report the climb; an empty task glob is a warning instead of a silent zero-task success (task 0136).
+
+**Publication**
+- The pre-publication privacy scan covers commit messages and author/committer names, attributes removed-file lines correctly, and applies tracked-path hygiene to every nested skill root (task 0128).
+
+**Review and guidance**
+- Step 7 routes agents to open-code-review (`ocr`) as a second reader: `ocr delegate rule` (no model call) by default, a full `ocr review` only with an approved provider passed explicitly. `scripts/reviewers/ocr_adapter.py` records OCR findings in `finish` through the reviewer contract and refuses providers outside its allowlist (task 0140, live verification pending).
+- Lighter path for work that ships no code; repository instructions win over this skill's tools; remove-the-dependency and mutation-table testing recipes (task 0139).
+
+**Usage trend since the previous releases** (task 0143): `finish` runs recorded across adopted repositories fell from 49 (Aug) to 13 (Sep), 2 (Oct) and 0 (Nov); 26 of 64 finishes hit the empty-scope trap fixed above. All 140 feedback notes from 2026-09-09 to 2026-11-21 are dispositioned (112 planned, 9 fix candidates, 18 declined, 1 earlier).
+
+## 0.12.0 — 2026-11-19
+
+- A v2 docs project may set `docs_root: .` (equal to its root), so record folders sit directly in `docs/{adr,tasks,...}` instead of a nested `docs/records/`. docs_root must still resolve inside the project root, and project and docs roots still must not overlap.
+- `document validate` no longer demands a new `updated` date for a record whose only change is a pure staged rename (git `R100`); the moved file stays in the changed set, so its other findings still block. JSON `changed_paths` gains `rename_only`.
+- `documentation-structure` guidance now matches the allocator: every record role is `NNNN-slug.md`, provenance lives in frontmatter `relationships` rather than `adr-`/`audit-`/`task-` filename prefixes or date prefixes, and the one-current-handoff rule names the validator findings that enforce it.
+
 ## 0.11.3 — 2026-09-09
 
 - Report document-validation change-set paths, effective date and fallback policy; unavailable discovery exits 3 while retaining findings. Preserve advisory-only success exits and guard run sealing against discovery failures, including nested-project fingerprints (task 0105).

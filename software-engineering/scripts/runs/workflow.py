@@ -22,7 +22,7 @@ from ..documents.validation import (
     validate_documents,
 )
 from ..policy.document_paths import DocumentContainment
-from ..policy.manifest import Check, Manifest, ManifestV2, ReviewerDeclaration
+from ..policy.manifest import Check, Manifest, ManifestError, ManifestV2, ReviewerDeclaration
 from ..policy.project_root import load_explicit_manifest, resolve_explicit_project_root
 from ..project.classifier import Change, classify_changes, git_changes, git_commit
 from ..project.discovery import Project, discover_instructions
@@ -261,8 +261,27 @@ def _relative_git_path(path: str | None, prefix: str) -> str | None:
     return path[len(marker) :] if path.startswith(marker) else None
 
 
+def _ancestor_manifest_root(root: Path) -> Path | None:
+    for parent in root.parents:
+        if (parent / "engineering.yaml").is_file():
+            return parent
+    return None
+
+
 def _exact_project(start: str | Path) -> tuple[Path, Manifest, Project, dict[str, object]]:
     resolution = resolve_explicit_project_root(start)
+    if not resolution.requested_has_manifest:
+        ancestor = _ancestor_manifest_root(resolution.root)
+        if ancestor is not None:
+            raise ManifestError(
+                [
+                    (
+                        f"no engineering.yaml at the exact root {resolution.root}; "
+                        f"the adopted project root is {ancestor}. start and finish require the "
+                        f"exact root, so rerun with `--project-root {shlex.quote(str(ancestor))}`"
+                    )
+                ]
+            )
     manifest = load_explicit_manifest(resolution, required=True)
     assert manifest is not None
     project = Project(resolution.root, manifest.path, _git_root(resolution.root))
@@ -568,6 +587,19 @@ def _head_advance(
     }
 
 
+def _replacement_start_command(root: Path, start_record: StartRecord) -> str:
+    """One portable replacement-run command recovered from an immutable start record."""
+    restart = (
+        "engineering start --intent "
+        f"{shlex.quote(start_record.intent)} --project-root {shlex.quote(str(root))}"
+    )
+    if start_record.requested_paths:
+        restart += " --paths " + " ".join(
+            shlex.quote(path) for path in start_record.requested_paths
+        )
+    return restart
+
+
 def _head_recovery_commands(
     root: Path,
     start_record: StartRecord,
@@ -583,15 +615,7 @@ def _head_recovery_commands(
             f"{shlex.quote(str(before))}..{shlex.quote(str(after))} -- "
             + " ".join(shlex.quote(path) for path in paths)
         )
-    restart = (
-        "engineering start --intent "
-        f"{shlex.quote(start_record.intent)} --project-root {shlex.quote(str(root))}"
-    )
-    if start_record.requested_paths:
-        restart += " --paths " + " ".join(
-            shlex.quote(path) for path in start_record.requested_paths
-        )
-    commands.append(restart)
+    commands.append(_replacement_start_command(root, start_record))
     return commands
 
 
@@ -789,12 +813,34 @@ def finish_run(
         raise LifecycleError("invalid run id")
     root, manifest, project, root_resolution = _exact_project(start)
     run_directory = root / ".engineering" / "runs" / run_id
+    if not run_directory.is_dir():
+        raise LifecycleError(f"start run does not exist: {run_id}")
     baseline = read_baseline(run_directory / "baseline.json")
     start_record = read_start(run_directory / "start.json")
     if start_record.run_id != run_id:
         raise LifecycleError("start record run id does not match target")
     if start_record.baseline_digest != record_digest(baseline):
         raise LifecycleError("start record does not bind the stored baseline")
+    if (run_directory / "final.json").exists():
+        replacement = _replacement_start_command(root, start_record)
+        return WorkflowResult(
+            "incompatible",
+            root,
+            {
+                "run_id": run_id,
+                "root_resolution": root_resolution,
+                "incompatible_fields": ["final"],
+                "next_commands": [replacement],
+            },
+            "\n".join(
+                (
+                    f"Traversal root: `{root}`",
+                    "A finish record already exists for this run; the run is sealed.",
+                    "Review it, then start a replacement run:",
+                    f"- `{replacement}`",
+                )
+            ),
+        )
     sealed_global = next(
         (item.path for item in start_record.authority if item.kind == "global"),
         None,
@@ -920,11 +966,14 @@ def finish_run(
     final_changes = _declared_changes(all_final_changes, start_record.requested_paths)
     final_paths = tuple(item.path for item in final_changes)
     preexisting_paths = {item.path for item in start_record.preexisting_changes}
+    requested_paths = start_record.requested_paths
+    # Task 0123: omitting --paths declares whole-project scope, so no change is unexpected.
     unexpected_changes = tuple(
         item
         for item in all_final_changes
         if item.path not in preexisting_paths
-        and not _within_declared_scope(item.path, start_record.requested_paths)
+        and bool(requested_paths)
+        and not _within_declared_scope(item.path, requested_paths)
     )
     relevant_changes = tuple(dict.fromkeys((*final_changes, *unexpected_changes)))
     relevant_paths = tuple(item.path for item in relevant_changes)
@@ -999,10 +1048,7 @@ def finish_run(
         (
             "Requested paths define intended scope; pre-existing changes are preserved separately."
             if start_record.requested_paths
-            else (
-                "No requested paths were declared; every non-pre-existing changed path is treated "
-                "as unexpected."
-            )
+            else "No requested paths were declared; the whole project is the declared scope."
         ),
     )
     manual_recovery_steps = tuple(dict.fromkeys(_recovery_code(value) for value in manual_recovery))

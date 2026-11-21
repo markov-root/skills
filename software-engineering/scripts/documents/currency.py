@@ -134,33 +134,38 @@ def _validate_role(
     containment: DocumentContainment | None = None,
 ) -> None:
     documents = _expand(root, role.include, findings, containment=containment)
-    index = _contained_path(root, role.index, findings, containment=containment)
+    index = (
+        _contained_path(root, role.index, findings, containment=containment)
+        if role.index is not None
+        else None
+    )
     documents = tuple(path for path in documents if index is None or path != index)
     if not documents:
         findings.append(
             _finding(
                 "currency.role-empty",
-                role.index,
+                role.index or role.include[0],
                 1,
                 f"role {role.name!r} matched no record documents",
             )
         )
 
     identifiers: dict[str, list[str]] = {}
-    for document in documents:
-        relative = document.relative_to(root).as_posix()
-        identifier = document.name[: role.id_prefix_digits]
-        if len(identifier) != role.id_prefix_digits or not identifier.isdigit():
-            findings.append(
-                _finding(
-                    "currency.record-id-missing",
-                    relative,
-                    1,
-                    f"role {role.name!r} requires a {role.id_prefix_digits}-digit filename prefix",
+    if role.id_prefix_digits:
+        for document in documents:
+            relative = document.relative_to(root).as_posix()
+            identifier = document.name[: role.id_prefix_digits]
+            if len(identifier) != role.id_prefix_digits or not identifier.isdigit():
+                findings.append(
+                    _finding(
+                        "currency.record-id-missing",
+                        relative,
+                        1,
+                        f"role {role.name!r} requires a {role.id_prefix_digits}-digit filename prefix",
+                    )
                 )
-            )
-            continue
-        identifiers.setdefault(identifier, []).append(relative)
+                continue
+            identifiers.setdefault(identifier, []).append(relative)
 
     for identifier, sources in sorted(identifiers.items()):
         if len(sources) < 2:

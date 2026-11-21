@@ -10,6 +10,7 @@ from .contracts import (
     EXIT_APPROVAL_REQUIRED,
     EXIT_BASELINE_INCOMPATIBLE,
     EXIT_CHECK_FAILED,
+    EXIT_INTERNAL_ERROR,
     EXIT_OK,
     EXIT_UNAVAILABLE,
     CommandResult,
@@ -48,7 +49,9 @@ def handle(args: argparse.Namespace) -> CommandResult:
         "failed": EXIT_CHECK_FAILED,
         "unavailable": EXIT_UNAVAILABLE,
         "incompatible": EXIT_BASELINE_INCOMPATIBLE,
-    }.get(result.status, EXIT_OK)
+        "passed": EXIT_OK,
+        "passed_with_advisories": EXIT_OK,
+    }.get(result.status, EXIT_INTERNAL_ERROR)
     return CommandResult(result.status, result.root, result.data, code, result.human)
 
 

@@ -31,8 +31,17 @@ PRIVATE_PATH_PREFIXES = (
 )
 
 
+def _skill_roots(root: Path) -> tuple[str, ...]:
+    """Root-relative directories holding a discovered nested Agent Skill artifact."""
+    roots: set[str] = set()
+    for pattern in ("*/SKILL.md", "skills/*/SKILL.md"):
+        for match in root.glob(pattern):
+            roots.add(match.parent.relative_to(root).as_posix())
+    return tuple(sorted(roots))
+
+
 def _skill_repository(root: Path) -> bool:
-    return any(root.glob("*/SKILL.md")) or any(root.glob("skills/*/SKILL.md"))
+    return bool(_skill_roots(root))
 
 
 def _finding(finding_id: str, message: str, path: str) -> ActiveFinding:
@@ -152,7 +161,12 @@ def run_gitignore_hygiene(root: Path) -> InspectionLayer:
         if prefix_with_slash and path.startswith(prefix_with_slash):
             path = path[len(prefix_with_slash) :]
         tracked_paths.add(path)
-    for prefix in PRIVATE_PATH_PREFIXES:
+    # Hygiene prefixes apply at the repository root AND relative to every
+    # discovered nested skill root (e.g. `<skill>/tests/`, `<skill>/docs/handoffs/`).
+    tracked_prefixes = list(PRIVATE_PATH_PREFIXES)
+    for skill_root in _skill_roots(root):
+        tracked_prefixes.extend(f"{skill_root}/{prefix}" for prefix in PRIVATE_PATH_PREFIXES)
+    for prefix in tracked_prefixes:
         if any(path == prefix or path.startswith(f"{prefix}/") for path in tracked_paths):
             findings.append(
                 _finding(

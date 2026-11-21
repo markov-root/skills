@@ -34,7 +34,7 @@ def select_checks(manifest: Manifest, selector: str) -> tuple[Check, ...]:
         return tuple(manifest.checks.values())
     profile = manifest.profiles.get(selector)
     if profile is None:
-        raise KeyError(f"unknown check or profile: {selector}")
+        raise ValueError(f"unknown check or profile: {selector}")
     return tuple(manifest.checks[name] for name in profile.checks)
 
 

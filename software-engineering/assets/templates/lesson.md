@@ -35,6 +35,8 @@ engineering_document:
 
 # Lesson NNNN: Durable lesson
 
+<!-- engineering-placeholder-markers: {"Owner": "LESSON OWNER", "Context": "Concrete situation that exposed the pattern.", "Durable lesson": "Transferable inference, not a universal slogan.", "Boundary": "Where the lesson applies, exceptions, and counter-signals.", "Evidence": "Observed results and links that support the inference.", "Consequence": "Specific behavior, check, documentation, or decision changed by the lesson."} -->
+
 <!-- Quality bar — write to the Lesson content standard
 the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #lesson):
 an actionable inference with a mechanism beyond chronology · provenance and maturity · retrieval cue,

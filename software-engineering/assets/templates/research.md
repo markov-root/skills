@@ -37,6 +37,8 @@ engineering_document:
 
 # Research NNNN: Research question
 
+<!-- engineering-placeholder-markers: {"Owner": "RESEARCH OWNER", "Question": "Decision-relevant question, success conditions, and exclusions.", "Method": "Search, comparison, experiment, and selection method.", "Sources": "Primary sources or reproducible evidence with dates and versions.", "Findings": "Evidence, competing explanations, and claim types.", "Uncertainty and limitations": "Missing evidence, volatility, conflicts, and re-verification triggers.", "Conclusion": "Bounded answer, unresolved questions, and decision handoff."} -->
+
 <!-- Quality bar — write to the Research content standard
 the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #research):
 a decision-relevant question stated up front · a reproducible method · sources with access dates ·

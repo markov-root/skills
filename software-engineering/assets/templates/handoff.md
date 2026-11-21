@@ -42,6 +42,8 @@ engineering_document:
 
 # Handoff NNNN: Continuation checkpoint
 
+<!-- engineering-placeholder-markers: {"Owner": "HANDOFF OWNER", "Outcome": "Current bounded result and proof limits.", "Completed work": "Implemented and verified records, with identifiers.", "Open work": "Remaining tasks in dependency order. Do not silently broaden their scope.", "Blockers": "Required user decisions, permissions, missing evidence, or `None`.", "Resume": "First safe command, authority files to read, and verification state to re-establish."} -->
+
 <!-- Quality bar — write to the Handoff content standard
 the software-engineering skill knowledge file knowledge/documentation-record-content-standards.md (section #handoff):
 continuation state for one work boundary · first action resolves from current state and is safe ·

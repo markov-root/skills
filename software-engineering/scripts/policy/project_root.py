@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,29 @@ class ExplicitProjectRoot:
             "requested_has_manifest": self.requested_has_manifest,
             "strategy": "explicit",
         }
+
+
+def git_root_boundary(start: Path) -> Path | None:
+    """The enclosing Git repository root, or ``None`` when Git does not answer.
+
+    Mirrors the ``runs.workflow`` Git probe (argument vector, bounded output, no
+    shell) so ancestor walks share one traversal boundary instead of a second
+    opinion about where a repository ends.
+    """
+
+    try:
+        result = subprocess.run(
+            ("git", "-C", str(start), "rev-parse", "--show-toplevel"),
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or len(result.stdout) > 16_384:
+        return None
+    value = result.stdout.decode(errors="replace").strip()
+    return Path(value).resolve() if value else None
 
 
 def resolve_explicit_project_root(start: str | Path) -> ExplicitProjectRoot:

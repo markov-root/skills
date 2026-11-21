@@ -1,0 +1,92 @@
+#!/bin/sh
+# Launcher for the software-engineering engineering CLI (task 0102).
+#
+# Invocation contract:
+#   (a) ENGINEERING_PYTHON set -> exec that interpreter with -I on the bundled
+#       entry point (operator-declared preprovisioned environment; uv unused).
+#   (b) otherwise -> `uv run --script <artifact>/scripts/engineering.py`, which
+#       uses the shared uv cache and may provision/update the script environment.
+#   (c) ONLY when uv fails before Python entry because the cache is unwritable
+#       (lock / permission / read-only file system evidence in uv's stderr),
+#       fall back to the newest preprovisioned environment in the uv cache whose
+#       installed package versions exactly match the adjacent engineering.py.lock,
+#       selected by a stdlib-only helper run with plain python3. Nothing is
+#       written to the cache, no temporary caches are created, and nothing is
+#       installed. If no environment matches, uv's original error is replayed
+#       with an actionable prerequisite line and the exit code is 3.
+set -u
+
+# Resolve this script's location, following symlinks (e.g. PATH installs).
+target=$0
+while [ -L "$target" ]; do
+    link_dir=$(CDPATH= cd -- "$(dirname -- "$target")" && pwd -P) || exit 127
+    target=$(readlink "$target") || exit 127
+    case $target in
+        /*) ;;
+        *) target=$link_dir/$target ;;
+    esac
+done
+script_dir=$(CDPATH= cd -- "$(dirname -- "$target")" && pwd -P) || exit 127
+entry=$script_dir/engineering.py
+lock=$script_dir/engineering.py.lock
+
+if [ -n "${ENGINEERING_PYTHON:-}" ]; then
+    exec "$ENGINEERING_PYTHON" -I "$entry" "$@"
+fi
+
+# Capture uv's stderr while letting the application's stdout through.
+# mktemp may be unavailable on a stripped PATH; fall back to a pid-suffixed
+# file that the sticky-bit temp directory makes safe for this short window.
+stderr_file=$(mktemp "${TMPDIR:-/tmp}/engineering-launcher-stderr.XXXXXX" 2>/dev/null)
+if [ -z "$stderr_file" ]; then
+    # No safe temp file: run uv directly without the read-only-cache fallback rather than
+    # writing to a predictable path another user could pre-create.
+    exec uv run --script "$entry" "$@"
+fi
+: >"$stderr_file" || exit 1
+started_file="$stderr_file.started"
+rm -f "$started_file"
+ENGINEERING_LAUNCHER_STARTED="$started_file" uv run --script "$entry" "$@" 2>"$stderr_file"
+status=$?
+started=0
+[ -e "$started_file" ] && started=1
+rm -f "$started_file"
+# Once Python has started, the command ran: replay its stderr and keep its exit status. Never
+# fall back (that would run the command twice).
+if [ "$status" -eq 0 ] || [ "$started" -eq 1 ]; then
+    cat "$stderr_file" >&2
+    rm -f "$stderr_file"
+    exit "$status"
+fi
+
+stderr=$(cat "$stderr_file")
+rm -f "$stderr_file"
+
+# Cache-unwritable detection: uv failed before Python entry because it could
+# not write to the uv cache (lock acquisition, permission, read-only file
+# system). Anything else is replayed unchanged.
+cache_failure=0
+stderr_lower=$(printf '%s' "$stderr" | tr '[:upper:]' '[:lower:]')
+case $stderr_lower in
+    *"could not acquire lock"* | \
+    *"failed to lock"* | \
+    *"could not create temporary file"* | \
+    *"read-only file system"* | \
+    *"permission denied"* | \
+    *"os error 13"* | \
+    *"os error 30"*) cache_failure=1 ;;
+esac
+
+if [ "$cache_failure" -eq 1 ]; then
+    env_python=$(python3 "$script_dir/engineering_env_match.py" "$lock" 2>/dev/null) || env_python=
+    if [ -n "$env_python" ]; then
+        printf 'engineering: uv cache is unwritable; falling back to preprovisioned environment %s\n' "$env_python" >&2
+        exec "$env_python" -I "$entry" "$@"
+    fi
+    printf '%s' "$stderr" >&2
+    printf '\nengineering: no preprovisioned environment in the uv cache matches engineering.py.lock.\nPrerequisite: run the artifact once with a writable cache to provision it, or set ENGINEERING_PYTHON to a python that has the pinned dependencies installed.\n' >&2
+    exit 3
+fi
+
+printf '%s\n' "$stderr" >&2
+exit "$status"

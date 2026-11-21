@@ -6,16 +6,24 @@
 # Wired as a PreToolUse hook on Write|Edit|MultiEdit (Claude Code). It reads the harness's hook JSON
 # on stdin and BLOCKS (exit 2) a code/build-file edit ONLY when the software-engineering skill has
 # not been consulted this session. Everything else — a prose/doc/data file, an already-consulted
-# session, or ANY error — ALLOWS the edit. Fail-OPEN by construction: the sole exit-2 path is the
-# positive "code file AND not consulted" decision, so a bug cannot brick editing (Claude Code treats
-# any non-2 exit / timeout as allow).
+# session, or ANY error (unparseable stdin, absent/unreadable transcript, missing python3) —
+# ALLOWS the edit. Fail-OPEN by construction: the sole exit-2 path is the positive "code file AND
+# not consulted" decision, so a bug cannot brick editing (Claude Code treats any non-2 exit /
+# timeout as allow).
 #
-# "Consulted" = this session's transcript shows the software-engineering Skill was invoked OR its
-# engineering.py CLI was run. Detected once from transcript_path, then cached per session_id so
-# subsequent edits are a cheap file-exists check. No dependency on (undocumented) Skill-tool hooks.
+# "Consulted" (task 0118) = this session's transcript — or, for a subagent, the parent session
+# transcript / for a parent, any of its subagent transcripts — shows a STRUCTURED tool_use entry:
+# the Skill tool invoked with `software-engineering`, or a Bash tool_use running the engineering
+# CLI (bundled engineering.py or the `engineering` launcher). Prose mentions, tool_result text and
+# hook block messages never count: the 0.12 gate satisfied itself with its own block REASON, so
+# the first block un-blocked every later edit. File classes AND consultation detection live in
+# se_gate_shared.py — the single source shared by every dialect (consult sh, lifecycle sh, and the
+# OpenCode plugin template rendered by harness/hooks.py). Detection runs once, then is cached per
+# session_id under ${XDG_CACHE_HOME:-~/.cache}/se-consult-gate/ (ids sanitized) so subsequent edits
+# are a cheap check.
 #
 # Env knobs (optional): SE_GATE_DISABLE=1 disables the block (audit only); SE_GATE_EXTS adds
-# space-separated extra globs to treat as code (e.g. "*.tf *.proto").
+# space-separated extra globs to treat as code (e.g. "*.tf *.proto", matched case-insensitively).
 set -uo pipefail
 allow() { exit 0; }   # permit / fail-open
 
@@ -24,54 +32,15 @@ allow() { exit 0; }   # permit / fail-open
 input="$(cat 2>/dev/null)" || allow
 [ -n "$input" ] || allow
 
-# Extract exactly the fields we need, one per line (path-with-spaces safe). Any failure → allow.
-mapfile -t F < <(printf '%s' "$input" | python3 -c '
-import sys, json
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-ti = d.get("tool_input") or {}
-print(d.get("tool_name", ""))
-print(ti.get("file_path") or ti.get("path") or "")
-print(d.get("session_id", ""))
-print(d.get("transcript_path", ""))
-' 2>/dev/null) || allow
-
-FILE="${F[1]:-}"; SID="${F[2]:-}"; TP="${F[3]:-}"
-[ -n "$FILE" ] || allow    # no file path → nothing to gate
-
-# Gate code/build files only; prose docs (.md/.txt/.rst) and data are intentionally NOT gated.
-is_code=1
-case "$FILE" in
-  *.py|*.js|*.mjs|*.cjs|*.ts|*.tsx|*.jsx|*.vue|*.svelte|*.go|*.rs|*.c|*.h|*.cc|*.cpp|*.hpp|*.cxx|\
-  *.java|*.kt|*.scala|*.rb|*.php|*.swift|*.m|*.mm|*.lua|*.pl|*.pm|*.r|*.jl|*.sh|*.bash|*.zsh|*.fish|\
-  *.sql|*.gradle|*.cs|*.fs|*.ex|*.exs|*.erl|*.clj|*.dart|*.hs) is_code=0 ;;
-  */Dockerfile|Dockerfile|*/Makefile|Makefile|*.mk|*/pyproject.toml|*/Cargo.toml|*/go.mod|\
-  */package.json|*/CMakeLists.txt) is_code=0 ;;
-esac
-if [ "$is_code" != 0 ]; then
-  # shellcheck disable=SC2254  # $g is intentionally a glob pattern (e.g. *.tf)
-  for g in ${SE_GATE_EXTS:-}; do case "$FILE" in $g) is_code=0; break ;; esac; done
-fi
-[ "$is_code" = 0 ] || allow
-
-# Fast path: already consulted this session.
-cache="${XDG_CACHE_HOME:-$HOME/.cache}/se-consult-gate"
-marker="$cache/${SID:-nosid}.ok"
-[ -f "$marker" ] && allow
-
-# Detect consultation from the session transcript (Skill invocation OR engineering.py CLI run).
-if [ -n "$TP" ] && [ -f "$TP" ]; then
-  if { grep '"name":"Skill"' "$TP" 2>/dev/null | grep -q 'software-engineering'; } \
-     || grep -q 'engineering\.py' "$TP" 2>/dev/null; then
-    mkdir -p "$cache" 2>/dev/null && : > "$marker" 2>/dev/null
-    allow
-  fi
-fi
+# Every decision — parse, code-file classification, transcript consultation scan, per-session
+# marker — comes from the shared module. Any failure (missing module, missing python3, crash)
+# allows: fail-open by construction.
+helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/se_gate_shared.py"
+verdict="$(printf '%s' "$input" | python3 "$helper" gate 2>/dev/null)" || allow
+[ "$verdict" = "block" ] || allow
 
 # Code/build file AND not consulted → BLOCK.
-REASON="[software-engineering gate] Blocked: this edits a code/build file but the software-engineering skill has NOT been consulted in this session. It is NON-OPTIONAL for non-trivial code work (project policy) — it establishes local authority, a pre-edit baseline, and the verification you must meet before claiming completion. Do this now then retry the edit: invoke the software-engineering skill and run its first step 'uv run --script ~/.agents/skills/software-engineering/scripts/engineering.py inspect'. Once consulted, every further edit this session proceeds without interruption (one-time per-session gate)."
+REASON="[software-engineering gate] Blocked: this edits a code/build file but the software-engineering skill has NOT been consulted in this session. It is NON-OPTIONAL for non-trivial code work (project policy) — it establishes local authority, a pre-edit baseline, and the verification you must meet before claiming completion. Do this now then retry the edit: invoke the software-engineering skill (Skill tool) and run its first step, 'engineering inspect' (or the bundled script: uv run --script <skill-root>/scripts/engineering.py inspect). Once consulted, every further edit this session proceeds without interruption (one-time per-session gate)."
 
 # Two block dialects. Default: Claude Code exit 2 + stderr (tested). --json: emit the
 # hookSpecificOutput deny object on stdout (Codex PreToolUse dialect) with exit 0.

@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..resources import resource_path
+from ..se_gate_shared import ts_code_regexes
 
 HOOKS: tuple[str, ...] = ("consult", "lifecycle")
 HARNESSES: tuple[str, ...] = ("claude", "codex", "opencode")
@@ -97,10 +99,34 @@ def _script(hook: str) -> str:
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.se-install-tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
+    """Write ``content`` to the REAL target of ``path`` atomically (task 0131).
+
+    A symlinked config (this machine's dotfiles model) stays a symlink: the write resolves
+    through it to the target. The existing target's mode is preserved (a private 0600 settings
+    file is never widened); a new file is created 0600. The temp file is uniquely named inside
+    the target's directory (concurrent installs cannot clobber a shared name), fsynced, then
+    ``os.replace``d — a crashed install never leaves a partial write or a shared temp behind.
+    """
+    target = Path(os.path.realpath(path))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(target.parent), prefix=f".{target.name}.se-install-", suffix=".tmp"
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            mode = os.stat(target).st_mode & 0o777
+        except OSError:
+            mode = 0o600  # new file: keep it private — never the umask-wide 0644 default
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def default_target(harness: str, home: Path | None = None) -> Path:
@@ -354,12 +380,22 @@ export default Plugin.define({
         consulted.add(e.sessionID);
         return;
       }
-      const CODE =
-        /\\.(py|js|mjs|cjs|ts|tsx|jsx|go|rs|c|h|cc|cpp|hpp|java|kt|rb|php|sh|sql)$/;
+      // File classes are RENDERED from scripts/se_gate_shared.py (task 0118 single source),
+      // same evaluation order: exact build-file names beat the prose exclusion
+      // (CMakeLists.txt); otherwise prose docs are never gated; then suffixes and loose
+      // build patterns (dockerfile*, *.mk, CI workflow YAML) apply — all case-insensitive.
+      const PROSE = /__PROSE__/i;
+      const CODE_SUFFIX = /__SUFFIX__/i;
+      const CODE_NAMES = /__NAMES__/i;
+      const CODE_SPECIAL = /__SPECIAL__/i;
       const path = String(e.input?.filePath ?? e.input?.path ?? "");
+      const isCode =
+        CODE_NAMES.test(path) ||
+        (!PROSE.test(path) &&
+          (CODE_SUFFIX.test(path) || CODE_SPECIAL.test(path)));
       if (
         ["edit", "write", "apply_patch"].includes(e.tool) &&
-        CODE.test(path) &&
+        isCode &&
         !consulted.has(e.sessionID)
       ) {
         throw new Error(
@@ -399,7 +435,13 @@ export default Plugin.define({
 def _opencode_content(hook: str) -> str:
     header = f"{_OPENCODE_MARKER} ({hook}) — remove via engineering install-hooks --uninstall\n"
     if hook == "consult":
-        body = _CONSULT_TS
+        prose, suffix, names, special = ts_code_regexes()
+        body = (
+            _CONSULT_TS.replace("__PROSE__", prose)
+            .replace("__SUFFIX__", suffix)
+            .replace("__NAMES__", names)
+            .replace("__SPECIAL__", special)
+        )
     else:
         body = _LIFECYCLE_TS_TEMPLATE.replace("__HOOK_PATH__", json.dumps(_script("lifecycle")))
     return header + body

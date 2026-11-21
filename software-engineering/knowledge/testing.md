@@ -199,6 +199,16 @@ either one. The test may be tautological, may exercise another implementation, m
 specification/example artifact, or may be guarding structure/configuration. Mutation testing can
 diagnose whether selected synthetic faults are observed; it is not an automatic deletion oracle.
 
+Two quick proofs that a test protects what it claims:
+
+- **Remove the dependency.** To show that a test isolates a unit from a collaborator (a network
+  call, a database, a cache), break or remove that collaborator and confirm the test still passes
+  for the right reason. To show a test *depends* on a fix, revert the fix and confirm the test fails.
+- **Mutation table.** For a small, consequential change, list a few deliberate faults (an inverted
+  condition, an off-by-one boundary, a swallowed error), apply each, and record which tests fail.
+  A fault no test notices marks a gap. Keep the table in the task evidence; it is a review aid,
+  not a coverage score.
+
 Delete or retire a test when its protected claim no longer exists, stronger evidence supersedes it,
 or maintenance cost exceeds documented value. Preserve historical evidence when regulation,
 incident learning, compatibility, or migration auditability requires it.
