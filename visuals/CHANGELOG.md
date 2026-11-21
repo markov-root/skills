@@ -1,5 +1,34 @@
 # Changelog
 
+
+## 0.9.1 — 2026-11-10
+
+- `scripts/visuals` is now a `skill-feedback` adapter (portfolio ADR 0006): each invocation records
+  a content-free start/finish event when collection is enabled; the dispatcher moved to
+  `scripts/cli/visuals`, the public name is unchanged, and `SKILL_FEEDBACK_DISABLE=1` bypasses it.
+  Tests and `smoke.sh` disable collection.
+## 0.9.0 — 2026-11-10
+
+Serve the presentation standard as a consumer (task 0026). Config schema stays version 1: both
+changes are additive, and existing projects load and validate unchanged.
+
+- New optional `[paths] visuals` key: the directory holding visuals, `_shared/` and scaffolds,
+  default `"visuals"`. `"."` puts visuals directly under the project root. `new`, `image`, and
+  `data` follow it.
+- `paths.consumer_manifest` accepts a list of glob patterns relative to the project root; `..` is
+  allowed for this key only. A pattern that matches no file is a consumer-join advisory.
+- The consumer join reads `deck.yaml` `visuals:` selectors. `latest` joins the visual. An exact
+  `X.Y.Z` that does not exist, or is not the published `latest`, is a consumer-join advisory. A
+  repository-relative key to another talk's visual is reported as external (`consumer_external` in
+  `validate --json`; `consumer_manifest.external` in `index --json`), never as a finding.
+- `init` inside a talk's `visuals/` directory (parent holds `audience/talk.yaml`) writes the talk
+  layout: `visuals = "."`, `consumer_manifest = ["../modules/*/deck/deck.yaml"]`, and the
+  `consumer-join` check selected. Its JSON report adds `layout`.
+- `index --json` rows add `latest` (the published version or null), `receipt` (project-relative
+  path of the latest receipt) and `latest_receipt_sha256`, next to the existing `slug` and
+  `versions`. The `consumer_manifest` object adds `paths` and `external`. The field contract is in
+  `index --help` and pinned by a contract test.
+
 ## 0.8.0 — 2026-10-28
 
 - Authored renders can remain unpublished for review. `probe --version` reads
@@ -62,7 +91,7 @@ asked for a negative result to be treated as information.
   exists only in the fallback stack.
   **Composited background is NOT solved, and says so.** ADR 0003 named this and font detection as
   the two measurements most likely to be confidently wrong. The available API returns a gradient's
-  *stops* rather than the composited colour behind a label, so unsupported paint returns `null`
+  _stops_ rather than the composited colour behind a label, so unsupported paint returns `null`
   rather than a fabricated value, and a test documents the limitation as a fact. Task 0011 is
   therefore `partial`, not `done` — a negative result recorded rather than papered over.
   `measure` leaves the page's rendered output byte-identical to a render without it.
@@ -70,7 +99,7 @@ asked for a negative result to be treated as information.
 ## 0.5.2 — 2026-10-28
 
 Knowledge improvements driven by evidence, not intuition. Six graphics rebuilt from brief and
-knowledge alone were judged *"not what I'd call good, but not bad"*; the diagnosis
+knowledge alone were judged _"not what I'd call good, but not bad"_; the diagnosis
 (`dev/docs/evidence/0018-parity-five/DIAGNOSIS.md`) found one cause behind six recurring defects:
 **every rule in `knowledge/` is a constraint, and thinness is an absence, so no constraint catches
 it.** A graphic can satisfy every stated rule and still ship informationally thin. Four changes, all
@@ -85,7 +114,7 @@ value-free:
   project reserves a band, a graphic in that family carries it; moving the credit into the body is
   the same defect wearing a different shape. Four of six rebuilds dropped or degraded it.
 - **`composition.md` §2 — a title-band canvas is an instruction.** A canvas profile reserving a band
-  for a container's title *means the container owns the title*, and a graphic rendered to it must
+  for a container's title _means the container owns the title_, and a graphic rendered to it must
   not draw one. Two rebuilds drew one anyway.
 - **`axes-and-sidebar.md` §1 and new §2b — axis craft.** Place an axis title as a title (rotated, or
   below the ticks) rather than as a floating note above the plot, which reads as commentary and
@@ -102,7 +131,7 @@ question; a declared style's `description` supplies the answer.
 - **The config reader accepts the TOML the schema advertises (task 0022).** `_read_toml_tracked`
   was a hand-rolled line-tracking parser that accepted a subset of the language it claimed to read:
   an array of inline tables — the natural way to write `scaffold.<style>.includes`, and the shape
-  the schema *requires* — failed with "unsupported TOML value" in both single- and multi-line form,
+  the schema _requires_ — failed with "unsupported TOML value" in both single- and multi-line form,
   as did a quoted key in a table header. Values now come from stdlib `tomllib` with a separate
   declaration-line index, so the `file:line` citation that justified the hand-rolled parser is
   preserved while the language is no longer second-guessed.

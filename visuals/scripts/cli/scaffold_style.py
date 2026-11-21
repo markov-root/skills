@@ -88,7 +88,7 @@ def plan_scaffold_style(config_resolved, kind: str, slug: str, force: bool, styl
         )
 
     root = Path(config_resolved.root)
-    visual_dir = root.joinpath(scaffold.VISUALS_DIR, *parts)
+    visual_dir = scaffold.visuals_dir_of(config_resolved).joinpath(*parts)
     source_dir = visual_dir / scaffold.SOURCE_DIR_NAME
     if visual_dir.exists() and not force:
         raise scaffold.ScaffoldRefused(

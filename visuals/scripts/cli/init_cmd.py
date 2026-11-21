@@ -15,6 +15,11 @@ Writes ONLY the config file, and only when adoption is possible:
 - An empty (or corpus-free) directory → the neutral scaffold: one profile,
   zero insets, no hooks, no advisory selection. Geometry and contract wiring
   only — no compositional opinion (ADR 0004).
+- A standard-1 talk's `visuals/` directory (its parent holds
+  `audience/talk.yaml`; task 0026) → the same body in the talk layout:
+  `paths.visuals = "."` so visuals sit directly under `<talk>/visuals/`, and
+  `paths.consumer_manifest = ["../modules/*/deck/deck.yaml"]` so every
+  module's deck joins. Reported as `"layout": "talk"`.
 
 The generated config is validated by writing it, then loading it back through
 `config.load_config` before the file is reported as written — an init that
@@ -72,9 +77,11 @@ def main(argv: list[str]) -> int:
             print(message, file=sys.stderr)
         return 2
 
+    talk = config.is_talk_visuals_dir(cwd)
     shape = config.discover_project_shape(cwd)
-    body = _body_from_shape(shape)
+    body = _body_from_shape(shape, talk=talk)
     mode = "discovered" if shape else "scaffold"
+    layout = "talk" if talk else "project"
 
     text = config.to_toml(body)
     target = cwd / config.CONFIG_NAME
@@ -110,13 +117,20 @@ def main(argv: list[str]) -> int:
                     "command": "init",
                     "written": str(target),
                     "mode": mode,
+                    "layout": layout,
                     "schema_version": written.schema_version,
                     "default_profile": written.default_profile,
                     "canvas_profiles": profiles,
                     "theme": written.theme if isinstance(written.theme, str) else "<inline table>",
                     "paths": {
-                        k: str(v.relative_to(written.root))
-                        for k, v in written.registry_paths.items()
+                        **{k: str(v.relative_to(written.root))
+                           for k, v in written.registry_paths.items()
+                           if k != "consumer_manifest"},
+                        "consumer_manifest": (
+                            written.consumer_manifest_patterns[0]
+                            if isinstance(body["paths"]["consumer_manifest"], str)
+                            else list(written.consumer_manifest_patterns)),
+                        "visuals": _rel_dir(written.visuals_dir, written.root),
                     },
                     "paths_not_found": list(body.get("_undiscovered_paths", ())),
                     "web_root": body.get("web_root"),
@@ -129,13 +143,17 @@ def main(argv: list[str]) -> int:
             )
         )
     else:
-        print(f"wrote {target} ({mode})")
+        print(f"wrote {target} ({mode}{', talk layout' if talk else ''})")
         print(f"  canvas: default {written.default_profile} {profiles}")
         print(f"  theme: {written.theme if isinstance(written.theme, str) else '<inline table>'}")
         if body.get("web_root"):
             print(f"  web_root: {body['web_root']} (found via {body['web_root_reference']})")
         for key in shape["paths"] if shape else written.registry_paths:
+            if key == "consumer_manifest":
+                print(f"  paths.{key}: {', '.join(written.consumer_manifest_patterns)}")
+                continue
             print(f"  paths.{key}: {written.registry_paths[key].relative_to(written.root)}")
+        print(f"  paths.visuals: {_rel_dir(written.visuals_dir, written.root)}")
         if body.get("_undiscovered_paths"):
             print("  contract paths not found — fill these in:")
             for key in body["_undiscovered_paths"]:
@@ -147,14 +165,21 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-def _body_from_shape(shape: dict | None) -> dict:
+def _rel_dir(directory: Path, root: Path) -> str:
+    rel = directory.relative_to(root).as_posix()
+    return rel or "."
+
+
+def _body_from_shape(shape: dict | None, talk: bool = False) -> dict:
     """Merge discovered corpus evidence into a full config body.
 
     Keep the empty-directory scaffold intact. A discovered tree with missing
     contract paths gets explicit replacement markers instead of inherited
-    scaffold values that could look like discovered facts.
+    scaffold values that could look like discovered facts. In a talk's
+    `visuals/` directory the talk layout's visuals dir and deck consumers are
+    kept whatever discovery finds (task 0026).
     """
-    body = config.scaffold_body()
+    body = config.scaffold_body(talk=talk)
     if not shape:
         return body
     canvas = body["canvas"]
@@ -168,9 +193,12 @@ def _body_from_shape(shape: dict | None) -> dict:
         else next(iter(shape["profiles"]))
     )
     body["theme"] = shape["theme"]
-    missing = tuple(key for key in body["paths"] if key not in shape["paths"])
+    talk_keys = ("consumer_manifest", "visuals") if talk else ()
+    missing = tuple(key for key in config.REGISTRY_KEYS
+                    if key not in shape["paths"] and key not in talk_keys)
     body["paths"] = {
-        key: shape["paths"].get(key, f"REPLACE_WITH_{key.upper()}")
+        key: body["paths"][key] if key in talk_keys
+        else shape["paths"].get(key, f"REPLACE_WITH_{key.upper()}")
         for key in body["paths"]
     }
     body["_undiscovered_paths"] = missing

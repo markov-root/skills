@@ -22,7 +22,7 @@ compatibility: >-
   the authored-render engine. The `image-generation` skill is an optional
   delegate, capability-detected and never a hard dependency.
 metadata:
-  version: "0.8.0"
+  version: "0.9.1"
 ---
 
 # visuals
@@ -34,7 +34,7 @@ holds them together. It deliberately owns **no opinion about what a graphic
 draws**; scaffolds emit contract wiring only, and no command ranks, scores, or
 grades a design.
 
-## Status at this version (0.8.0)
+## Status at this version (0.9.0)
 
 Implemented: `bump`, `data`, `doctor`, `image`, `index`, `init`, `new`,
 `render`, `publish`, `measure`, `check`, `probe`, `improve`, `sources`, `theme`,
@@ -113,6 +113,20 @@ and JSON columns. Styles have no default, inheritance, or bundled definitions.
 Where no content baseline exists it says
 `unknown` and names what is missing rather than guessing. It is a status view,
 not a gate — a completed run exits `0` however many anomalies it reports.
+`index --json` is also the resolution contract for consumers: each row carries
+`slug`, `latest` (the published `vX.Y.Z`, or null), `versions`, `receipt` and
+`latest_receipt_sha256` (`scripts/visuals index --help` documents the fields).
+
+**Presentation talks.** Run `init` inside a standard-1 talk's `visuals/`
+directory (its parent holds `audience/talk.yaml`) and the config uses the talk
+layout: `[paths] visuals = "."` keeps visuals and `_shared/` directly in
+`<talk>/visuals/`, and `consumer_manifest = ["../modules/*/deck/deck.yaml"]`
+joins every module's deck. `paths.consumer_manifest` accepts one path or a list
+of glob patterns; a `deck.yaml`'s `visuals:` pins (`latest` or `X.Y.Z`) are
+checked by the consumer join — an exact version that is absent or not the
+published `latest` is an advisory, and a repository-relative key to another
+talk's visual is listed as external. Projects without `paths.visuals` keep
+`<root>/visuals/<slug>`.
 
 `sources` re-hashes every declared asset against its recorded digest, requires
 https provenance rather than prose, keeps the untransformed original of a

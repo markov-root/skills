@@ -29,6 +29,7 @@ arrive, then you write in the resolved voice.
 | Inform the public quickly       | journalism            | neutral, factual              | lede · attribution · descending importance                    | verification, balance, no buried lede     |
 | Immerse / entertain             | narrative / fiction   | character- and world-specific | scene vs. summary · conflict · change                         | stakes, pacing, sensory detail            |
 | Feed / thread (short)           | social                | native, human                 | one promise per unit, hook first                              | nuance moved to replies/links             |
+| Speak to a live audience        | talk / presentation   | spoken, conversational        | one point per slide · spoken transitions · a clear close      | how it sounds aloud, not how it reads     |
 
 ## Per-genre obligations (what "failed" means)
 
@@ -53,6 +54,10 @@ arrive, then you write in the resolved voice.
   rest in _summary_; embodied, sensory, character-filtered, rhythmically
   intentional. "Show, don't tell" is a useful default, not a law — strong
   narrative uses both.
+- **Talk / presentation script.** Words written to be said aloud: speakable
+  sentences, no written-only habits, numbers given the way a speaker says them.
+  A local module whose `voice_scope` begins `presentation` overrides the default;
+  check for it before drafting, including when the task looks like folder setup.
 - **Social / threads.** Hook in the first line, one idea per unit, platform-native
   formatting, human specificity; move nuance to replies, never inflate into
   clickbait.

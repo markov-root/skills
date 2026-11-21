@@ -118,6 +118,8 @@ def _resolve_data_dir(args: argparse.Namespace) -> tuple[Path | None, str]:
             "working directory); to pass: run visuals init, or pass --data-dir PATH"
         )
     visual_dir = resolved.root / args.slug
+    if not visual_dir.is_dir() and (resolved.visuals_dir / args.slug).is_dir():
+        visual_dir = resolved.visuals_dir / args.slug  # paths.visuals (task 0026)
     if not visual_dir.is_dir():
         return None, (
             f"no visual {args.slug!r} under {resolved.root}; to pass: create it "

@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.11.0 — 2026-11-19
+
+- New `scripts/pangram.py`: an opt-in screen that sends a draft to the Pangram API and lists the
+  most AI-like windows with line anchors. One detector's opinion; never a gate, never an authorship
+  verdict. Each check is logged to a private local corpus, with provenance (who wrote the text) kept
+  apart from the verdict. Responses are cached by text hash. `corpus stats`, `corpus mine`
+  (contrastive log-odds candidate tells), `corpus terms` (whether each watch-list entry predicts
+  AI-labelled windows), `corpus style` (topic-robust style features, including before/after
+  pairs), `corpus pairs`, `corpus import` (earlier Pangram results, no API call), `corpus label`
+  and `corpus list`. Reads `.md`, `.tex` and plain text; reports six categories (label ×
+  confidence) with an OK/Review/Rewrite status. Exit 0 ok, 2 usage, 3 unavailable,
+  4 credits/rate limit, 5 task failed.
+- `ai-tells.md`: new "Detector signals are not tic lists" section. Rebuild sentences rather than
+  launder words, and evolve the catalogue from corpus evidence.
+
+## 0.10.0 — 2026-11-10
+
+- New `scripts/revoice_check.py`: lossless re-voice preservation check. Compares two versions of a
+  slide-sectioned script and reports every number, direct quotation and `## <slide-id>` heading lost
+  or altered, plus stand-off annotation anchors orphaned by the new version. JSON or a one-line
+  summary; exit 0 lossless, 1 loss found, 2 usage error.
+
+## 0.9.4 — 2026-11-10
+
+- Frame step opens with an explicit voice-discovery instruction, so a talk or presentation script
+  picks up an installed presentation voice even when the task looks like folder setup.
+- Genre routing gains a talk / presentation row.
+- Private presentation-voice module: evidence path updated after a repository reorganisation.
+
+## 0.9.3 — 2026-11-09
+
+- Private presentation-voice module: coherence calibration from a read-aloud run-through.
+
+## 0.9.2 — 2026-11-08
+
+- Private presentation-voice module: timing treated as advisory; intro guidance refined.
+
+## 0.9.1 — 2026-11-05
+
+- Private presentation-voice module: re-voicing rules derived from paired written and spoken
+  material.
+
+## 0.9.0 — 2026-11-05
+
+- Private presentation-voice module: distinguishes *drafting* new material from *re-voicing* a
+  script whose content is fixed; adds a calibration from a multi-talk corpus (pacing, spoken
+  structure, numbers). Supporting evidence lives in private reference files that are excluded from
+  public export.
+
+## 0.8.0 — 2026-11-04
+
+- Private presentation-voice module: adds argument-shape, density and stance guidance with
+  measured targets; private voice-baseline references ship alongside it and are excluded from
+  public export.
+
+## 0.7.0 — 2026-10-11
+
+- **Report voice revised against external review of a published report.** The
+  private report-voice module now records each reviewer-driven rule beside the
+  feedback it came from, because a rule without its evidence drifts back to taste.
+  Changes include: subject-anchored framing becomes a stated choice rather than
+  the default; table emphasis follows "more salient is worse" consistently; bold
+  is reserved for sentences that are themselves findings; small-denominator counts
+  precede rates; one presentation and one visual channel per quantity; and
+  substantial AI drafting is disclosed to reviewers. Two unresolved reviewer
+  disagreements are recorded as per-report decisions. No public module changed.
+
+## 0.6.1 — 2026-09-24
+
+- **Duration governs how much mechanism survives.** The private spoken-voice
+  module's advice to explain mechanisms through ordinary actions was calibrated
+  on a briefing with room to breathe, and inverts under seven minutes. Added a
+  rough per-duration guide and the failure mode it prevents: mechanism passages
+  are usually the best-written part of a draft, so they survive editing on
+  quality while the argument they serve gets squeezed. Cut by duration budget,
+  not by paragraph quality.
+
+## 0.6.0 — 2026-09-24
+
+- **Spoken-voice calibration from a second evidence set.** A locally-installed,
+  private voice module for spoken talks gained a dated calibration section drawn
+  from seven further passages (five rehearsal transcripts, two the author had
+  polished for reading). It records mechanics a written-prose profile does not
+  cover — chiefly that a dash has no spoken realisation, so scripts should carry
+  none — plus six explanation moves the earlier distillation missed, and two
+  caveats for measuring a spoken voice with `voice_fingerprint.py`: contraction
+  rates read low in any transcript-derived baseline because speech-to-text
+  expands them, and the fingerprint's hedge metric disagrees with
+  `scripts/hedges.py` on the same draft. No public module changed.
+
 ## 0.5.1 — 2026-09-22
 
 - **`voice-default.md`: describe the voice modules by role, not by name.** The

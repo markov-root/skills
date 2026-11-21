@@ -128,7 +128,7 @@ def main(argv: list[str]) -> int:
                          "derived_from": applied.theme.derived_from}
                         if applied.theme else
                         {"status": "reused", "path": str(
-                            config_resolved.root / scaffold.VISUALS_DIR
+                            scaffold.visuals_dir_of(config_resolved)
                             / scaffold.SHARED_DIR / scaffold.THEME_CSS_NAME)}
                     ),
                 },

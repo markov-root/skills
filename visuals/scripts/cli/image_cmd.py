@@ -212,15 +212,17 @@ def build_receipt(
 # --------------------------------------------------------------------------
 
 
-def _resolve_visual_dir(root: Path, slug: str, store) -> Path:
+def _resolve_visual_dir(root: Path, slug: str, store, visuals_dir: Path | None = None) -> Path:
     """Where this visual's store lives: candidates match render's convention
-    (`<root>/visuals/<slug>`, then `<root>/<slug>`); created on first
+    (`<visuals_dir>/<slug>`, then `<root>/<slug>`); created on first
     generation — a generated visual has no source master, the prompt is the
-    lineage."""
-    for cand in (root / "visuals" / slug, root / slug):
+    lineage. `visuals_dir` is the config's `paths.visuals` (task 0026),
+    `<root>/visuals` by default."""
+    base = visuals_dir if visuals_dir is not None else root / "visuals"
+    for cand in (base / slug, root / slug):
         if cand.is_dir() and store.existing_versions(cand):
             return cand
-    return root / "visuals" / slug
+    return base / slug
 
 
 def _refs_for_receipt(args_refs: list[str], manifest: dict | None, store) -> list[dict]:
@@ -268,7 +270,8 @@ def main(argv: list[str]) -> int:
         )
         return 3
 
-    visual_dir = _resolve_visual_dir(config_resolved.root, args.slug, store)
+    visual_dir = _resolve_visual_dir(config_resolved.root, args.slug, store,
+                                     getattr(config_resolved, "visuals_dir", None))
     if args.into is not None:
         if not store.VERSION_RE.match(args.into):
             print(

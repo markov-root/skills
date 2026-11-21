@@ -141,6 +141,8 @@ class Report:
     registry_entries: int
     findings: list[Finding] = field(default_factory=list)
     not_run: list[NotRun] = field(default_factory=list)
+    #: Task 0026: cross-talk deck.yaml keys — reported, never findings.
+    consumer_external: list[dict] = field(default_factory=list)
 
     @property
     def blocking(self) -> list[Finding]:
@@ -176,6 +178,7 @@ class Report:
             "blocking_conditions": list(BLOCKING_CONDITIONS),
             "findings": self.findings_by_location(),
             "advisory_checks_not_run": [n.to_dict() for n in self.not_run],
+            "consumer_external": list(self.consumer_external),
             "summary": {"blocking": len(self.blocking), "advisory": len(self.advisory)},
         }
 
@@ -205,6 +208,11 @@ class Report:
             lines.extend(
                 f"  [{f.condition}] {f.location}: {f.message}" for f in self.advisory
             )
+        if self.consumer_external:
+            lines.append("external consumer references (another talk's visuals; "
+                         "not checked here, not findings):")
+            lines.extend(f"  {r['key']}: {r['selector']} ({Path(r['manifest']).name})"
+                         for r in self.consumer_external)
         if self.not_run:
             lines.append("advisory checks NOT run (a quiet report is not a clean one):")
             lines.extend(f"  {n.check} — {n.reason}" for n in self.not_run)
@@ -649,84 +657,328 @@ def consumer_manifest_refs(manifest_path: Path) -> list[str]:
     return refs
 
 
+#: A deck.yaml selector (presentation skill deck.schema.json): `latest` or an
+#: exact semantic version, without the store's `v` prefix.
+DECK_SELECTOR_RE = re.compile(r"^(latest|(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$")
+
+
+@dataclass(frozen=True)
+class ConsumerRef:
+    """One reference a consumer manifest makes to a visual (task 0026).
+
+    `selector` is `latest` or an exact `X.Y.Z` (legacy SLIDES.md references
+    are always `latest`). `kind` is `local` (the key names a visual of THIS
+    project; `target` is where it would live) or `external` (a
+    repository-relative path to another talk's visual — reported, never an
+    error, because this project cannot see that store)."""
+
+    manifest: Path
+    key: str
+    selector: str
+    kind: str  # "local" | "external"
+    target: Path | None
+
+    def to_dict(self) -> dict:
+        return {"manifest": str(self.manifest), "key": self.key,
+                "selector": self.selector, "kind": self.kind}
+
+
+def is_deck_manifest(path: Path) -> bool:
+    """A *.yaml / *.yml consumer manifest is a presentation deck.yaml."""
+    return path.suffix.lower() in (".yaml", ".yml")
+
+
+def _yaml_scalar(text: str) -> str:
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return text
+
+
+def _strip_comment(line: str) -> str:
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+    return line
+
+
+def deck_visuals(text: str) -> tuple[list[tuple[str, str]], str | None]:
+    """The `visuals:` mapping of a deck.yaml, as (key, selector) pairs in file
+    order, plus a parse problem (or None).
+
+    Stdlib only, deliberately narrow: `validate` and `index` route as stdlib
+    commands, so this reads exactly the shape deck.schema.json allows for this
+    one key — a top-level block mapping of scalar keys to scalar selectors, or
+    a one-line flow mapping (`visuals: {a: latest}`). Anything else under
+    `visuals:` is reported as a problem rather than guessed at."""
+    lines = text.splitlines()
+    for index, raw in enumerate(lines):
+        line = _strip_comment(raw).rstrip()
+        match = re.match(r"^visuals\s*:(.*)$", line)
+        if not match:
+            continue
+        rest = match.group(1).strip()
+        if rest in ("{}", "null", "~"):
+            return [], None
+        if rest:
+            if not (rest.startswith("{") and rest.endswith("}")):
+                return [], "`visuals:` is neither a block mapping nor a flow mapping"
+            pairs = []
+            for item in filter(None, (x.strip() for x in rest[1:-1].split(","))):
+                key, sep, value = item.partition(":")
+                if not sep:
+                    return [], f"`visuals:` flow entry {item!r} has no `key: selector`"
+                pairs.append((_yaml_scalar(key), _yaml_scalar(value)))
+            return pairs, None
+        pairs = []
+        indent = None
+        for body in lines[index + 1:]:
+            stripped = _strip_comment(body).rstrip()
+            if not stripped.strip():
+                continue
+            lead = len(stripped) - len(stripped.lstrip())
+            if lead == 0:
+                break  # next top-level key ends the mapping
+            if indent is None:
+                indent = lead
+            if lead != indent:
+                return pairs, "`visuals:` entries are not one flat mapping of key: selector"
+            entry = stripped.strip()
+            if entry.startswith(("\"", "'")):
+                close = entry.index(entry[0], 1) if entry[0] in entry[1:] else -1
+                if close < 0 or not entry[close + 1:].lstrip().startswith(":"):
+                    return pairs, f"`visuals:` entry {entry!r} has no `key: selector`"
+                key, value = entry[1:close], entry[close + 1:].lstrip()[1:]
+            else:
+                key, sep, value = entry.partition(":")
+                if not sep:
+                    return pairs, f"`visuals:` entry {entry!r} has no `key: selector`"
+            pairs.append((_yaml_scalar(key), _yaml_scalar(value)))
+        return pairs, None
+    return [], None
+
+
+def consumer_refs(manifest_path: Path, root: Path, visuals_dir: Path | None = None) -> list[ConsumerRef]:
+    """Every visual reference one manifest makes, deduplicated by key.
+
+    A deck.yaml is read through its `visuals:` selectors (task 0026); any other
+    manifest through the `visuals/<slug>/latest` scan, against its own visuals
+    base, exactly as before. An unreadable manifest yields no refs — callers
+    report that condition in their own vocabulary."""
+    if not is_deck_manifest(manifest_path):
+        base = _visuals_base(manifest_path, root)
+        return [ConsumerRef(manifest_path, slug, "latest", "local", base / "visuals" / slug)
+                for slug in consumer_manifest_refs(manifest_path)]
+    try:
+        text = manifest_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    base = visuals_dir if visuals_dir is not None else root / "visuals"
+    refs: list[ConsumerRef] = []
+    seen: set[str] = set()
+    for key, selector in deck_visuals(text)[0]:
+        if key in seen:
+            continue
+        seen.add(key)
+        local = base / key
+        first = key.split("/", 1)[0]
+        external = ("/" in key and not _exists_as_visual(local)
+                    and not (base / first).is_dir())
+        refs.append(ConsumerRef(manifest_path, key, selector,
+                                "external" if external else "local",
+                                None if external else local))
+    return refs
+
+
+def _published_version(visual_dir: Path) -> str | None:
+    """The version `latest` points at (the PUBLISHED one), or None."""
+    link = visual_dir / "latest"
+    if not (link.is_symlink() and link.exists()):
+        return None
+    target = os.readlink(link)
+    return target if store.VERSION_RE.match(target) else None
+
+
+#: Public alias: `index` reports the same published version the join checks pins against.
+published_version = _published_version
+
+
 def consumer_join_findings(
-    manifest_path: Path, root: Path, visual_dirs: tuple[Path, ...]
+    manifest_path, root: Path, visual_dirs: tuple[Path, ...],
+    visuals_dir: Path | None = None, unmatched_patterns: tuple[str, ...] = (),
 ) -> list[Finding]:
-    """Reconcile the consumer manifest against the visuals on disk.
+    """Reconcile the consumer manifest(s) against the visuals on disk.
 
     Both directions (criterion 4, audit F6): a manifest entry naming a visual
     that does not exist, AND a built visual with a resolving `latest` that no
     manifest entry references. Drift is reported; the manifest's editorial
-    content is not maintained here (architecture, "Consumer join")."""
-    if not manifest_path.is_file():
-        return [
-            Finding(
-                "consumer-join",
-                "high",
-                str(manifest_path),
-                "no consumer manifest at paths.consumer_manifest — the "
-                "documented join between deck and assets cannot be reconciled; "
-                "to pass: point paths.consumer_manifest in visuals.toml at the "
-                "manifest that references visuals/<slug>/latest",
-            )
-        ]
-    # Probed here so an unreadable manifest is reported as its own finding:
-    # consumer_manifest_refs() degrades to no refs, which would otherwise look
-    # like a manifest that references nothing.
-    try:
-        manifest_path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        return [
-            Finding(
-                "consumer-join",
-                "high",
-                str(manifest_path),
-                f"consumer manifest is unreadable ({exc}); to pass: fix the "
-                "file or its path in visuals.toml",
-            )
-        ]
-    # One read rule for the manifest: reconciliation and any status view over the
-    # same manifest must agree on which slugs it references.
-    refs = consumer_manifest_refs(manifest_path)
-    base = _visuals_base(manifest_path, root)
-    on_disk = {_visual_slug(vd, base): vd for vd in visual_dirs}
+    content is not maintained here (architecture, "Consumer join").
 
+    Task 0026: `manifest_path` may be one Path (pre-0026 callers, unchanged) or
+    a sequence of them — every module's deck.yaml. A deck.yaml pin at an exact
+    version that is absent, or is not the published `latest`, is reported in
+    this same advisory vocabulary; a cross-talk key is external, not a
+    finding (see `consumer_external_refs`)."""
+    manifests = (manifest_path,) if isinstance(manifest_path, Path) else tuple(manifest_path)
     findings: list[Finding] = []
-    for slug in refs:
-        target = base / "visuals" / slug
-        if not _exists_as_visual(target):
-            findings.append(
-                Finding(
-                    "consumer-join",
-                    "high",
-                    f"{manifest_path.name}: {slug}",
-                    f"the consumer manifest names visuals/{slug}/latest, "
-                    "which does not exist on disk — a deck row that renders "
-                    "nothing (audit F6 direction 1); to pass: build the "
-                    "visual, or update the manifest to the visual that "
-                    "replaced it",
-                )
-            )
-    referenced = set(refs)
-    for slug, vdir in sorted(on_disk.items()):
+    for pattern in unmatched_patterns:
+        findings.append(Finding(
+            "consumer-join", "high", f"paths.consumer_manifest: {pattern}",
+            f"no consumer manifest matches {pattern!r} — the documented join "
+            "between consumers and assets cannot be reconciled; to pass: "
+            "create a manifest the pattern matches, or correct the pattern in "
+            "visuals.toml",
+        ))
+    if not manifests and not unmatched_patterns:
+        return findings
+    readable: list[Path] = []
+    for manifest in manifests:
+        problem = _manifest_problem(manifest)
+        if problem is not None:
+            findings.append(problem)
+        else:
+            readable.append(manifest)
+    if not readable:
+        return findings
+
+    referenced: set[Path] = set()
+    for manifest in readable:
+        if is_deck_manifest(manifest):
+            pairs, parse_problem = deck_visuals(manifest.read_text(encoding="utf-8", errors="replace"))
+            if parse_problem:
+                findings.append(Finding(
+                    "consumer-join", "high", _manifest_label(manifest, manifests),
+                    f"{parse_problem}; the entries after it were not joined — to "
+                    "pass: write `visuals:` as a flat mapping of key: latest | X.Y.Z",
+                ))
+        for ref in consumer_refs(manifest, root, visuals_dir):
+            if ref.kind == "external":
+                continue
+            findings.extend(_ref_findings(ref, manifests))
+            if ref.target is not None:
+                referenced.add(ref.target.resolve())
+
+    legacy_single = len(manifests) == 1 and not is_deck_manifest(manifests[0])
+    base = _visuals_base(manifests[0], root) if legacy_single else (
+        visuals_dir if visuals_dir is not None else root / "visuals")
+    for vdir in sorted(visual_dirs, key=lambda v: _visual_slug(v, base)):
+        slug = _visual_slug(vdir, base)
         latest = vdir / "latest"
         if not (latest.is_symlink() and latest.exists()):
             continue  # no resolving latest: not a built, joinable visual
-        if slug not in referenced:
+        if vdir.resolve() not in referenced:
+            where = "the consumer manifest" if legacy_single else "any consumer manifest"
+            remedy = (f"reference it as visuals/{slug}/latest from the manifest"
+                      if legacy_single else
+                      f"pin it as `{slug}: latest` in a deck.yaml `visuals:` mapping")
             findings.append(
                 Finding(
                     "consumer-join",
                     "medium",
                     slug,
                     f"visual {slug} has a resolving `latest` but appears "
-                    "nowhere in the consumer manifest — the documented join is "
+                    f"nowhere in {where} — the documented join is "
                     "stale in the other direction (audit F6 direction 2); to "
-                    "pass: reference it as visuals/"
-                    f"{slug}/latest from the manifest, or record its real "
+                    f"pass: {remedy}, or record its real "
                     "delivery state there",
                 )
             )
     return findings
+
+
+def consumer_external_refs(manifests, root: Path, visuals_dir: Path | None = None) -> list[ConsumerRef]:
+    """Cross-talk references (repository-relative keys) across the manifests:
+    reported as external, never as findings — this project cannot see them."""
+    out: list[ConsumerRef] = []
+    for manifest in manifests:
+        if manifest.is_file() and is_deck_manifest(manifest):
+            out.extend(r for r in consumer_refs(manifest, root, visuals_dir) if r.kind == "external")
+    return out
+
+
+def _manifest_label(manifest: Path, manifests: tuple[Path, ...]) -> str:
+    """The location prefix for a manifest's findings: its file name when it is
+    the only one (pre-0026 form), else enough of its path to tell decks apart."""
+    if len(manifests) == 1:
+        return manifest.name
+    return "/".join(manifest.parts[-4:]) if is_deck_manifest(manifest) else manifest.name
+
+
+def _manifest_problem(manifest: Path) -> Finding | None:
+    if not manifest.is_file():
+        return Finding(
+            "consumer-join",
+            "high",
+            str(manifest),
+            "no consumer manifest at paths.consumer_manifest — the "
+            "documented join between deck and assets cannot be reconciled; "
+            "to pass: point paths.consumer_manifest in visuals.toml at the "
+            "manifest that references visuals/<slug>/latest",
+        )
+    # Probed here so an unreadable manifest is reported as its own finding:
+    # consumer_manifest_refs() degrades to no refs, which would otherwise look
+    # like a manifest that references nothing.
+    try:
+        manifest.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return Finding(
+            "consumer-join",
+            "high",
+            str(manifest),
+            f"consumer manifest is unreadable ({exc}); to pass: fix the "
+            "file or its path in visuals.toml",
+        )
+    return None
+
+
+def _ref_findings(ref: ConsumerRef, manifests: tuple[Path, ...]) -> list[Finding]:
+    label = _manifest_label(ref.manifest, manifests)
+    deck = is_deck_manifest(ref.manifest)
+    if ref.target is None or not _exists_as_visual(ref.target):
+        named = f"`{ref.key}: {ref.selector}`" if deck else f"visuals/{ref.key}/latest"
+        return [Finding(
+            "consumer-join",
+            "high",
+            f"{label}: {ref.key}",
+            f"the consumer manifest names {named}, "
+            "which does not exist on disk — a deck row that renders "
+            "nothing (audit F6 direction 1); to pass: build the "
+            "visual, or update the manifest to the visual that "
+            "replaced it",
+        )]
+    if not DECK_SELECTOR_RE.match(ref.selector):
+        return [Finding(
+            "consumer-join", "high", f"{label}: {ref.key}",
+            f"`{ref.key}: {ref.selector}` is not a selector (expected latest or "
+            "an exact X.Y.Z); to pass: pin latest or a published version",
+        )]
+    if ref.selector == "latest":
+        return []  # a missing/dangling latest is the blocking condition's to name
+    pinned = f"v{ref.selector}"
+    published = _published_version(ref.target)
+    if pinned not in store.existing_versions(ref.target):
+        versions = ", ".join(store.existing_versions(ref.target)) or "none"
+        return [Finding(
+            "consumer-join", "medium", f"{label}: {ref.key}",
+            f"`{ref.key}: {ref.selector}` pins {pinned}, which does not exist "
+            f"(versions on disk: {versions}) — the deck would render nothing; "
+            "to pass: pin latest or an existing published version",
+        )]
+    if pinned != published:
+        return [Finding(
+            "consumer-join", "medium", f"{label}: {ref.key}",
+            f"`{ref.key}: {ref.selector}` pins {pinned}, which is not the "
+            f"published version (latest -> {published or 'none'}) — the deck "
+            f"ships an unpublished render; to pass: `visuals publish {ref.key} "
+            f"{pinned}` after review, or pin latest",
+        )]
+    return []
 
 
 def _exists_as_visual(path: Path) -> bool:
@@ -874,13 +1126,19 @@ def run_validation(
             report.findings.extend(findings)
             report.registry_entries = entries
         if "consumer-join" in selected_set:
+            manifests, unmatched = config_module.consumer_manifest_paths(config_resolved)
             report.findings.extend(
                 consumer_join_findings(
-                    config_resolved.registry_paths["consumer_manifest"],
+                    manifests,
                     root,
                     visual_dirs,
+                    visuals_dir=config_resolved.visuals_dir,
+                    unmatched_patterns=unmatched,
                 )
             )
+            report.consumer_external = [
+                r.to_dict() for r in consumer_external_refs(
+                    manifests, root, config_resolved.visuals_dir)]
     else:
         for check in PROJECT_WIDE_CHECKS:
             report.not_run.append(
@@ -964,7 +1222,7 @@ def _visuals_for_slug(root: Path, slug: str) -> tuple[Path, ...]:
     """The visual directory a slug names: <root>/visuals/<slug>, <root>/<slug>,
     or a unique visual whose directory NAME is <slug> anywhere under the root
     (an adopted corpus may keep its visuals under nested paths)."""
-    for candidate in (root / "visuals" / slug, root / slug):
+    for candidate in (root / "visuals" / slug, root / slug):  # root == visuals_dir covers "."
         if is_visual_dir(candidate):
             return (candidate.resolve(),)
     matches = [v for v in discover_visuals(root) if v.name == slug]

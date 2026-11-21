@@ -55,6 +55,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import config as config_module
 import store
 import validate as validate_module
 import visual_style
@@ -391,10 +392,19 @@ class Row:
     advisory_findings: int
     consumer_referenced: bool
     cause: str | None = None
+    receipt: str | None = None  # project-relative path of the latest receipt
+    latest_receipt_sha256: str | None = None
 
     def to_dict(self) -> dict:
         return {
+            # Resolution contract (task 0026, AC-2) — read by the presentation
+            # CLI; additive, so the envelope's schema_version stays 1:
+            #   slug, latest (PUBLISHED vX.Y.Z or null), versions (sorted),
+            #   receipt (project-relative or null), latest_receipt_sha256.
             "slug": self.slug,
+            "latest": self.current_version,
+            "receipt": self.receipt,
+            "latest_receipt_sha256": self.latest_receipt_sha256,
             "join_slug": self.join_slug,
             "path": self.path,
             "layout": self.layout,
@@ -425,6 +435,11 @@ class IndexReport:
     manifest_path: Path | None = None
     manifest_references: tuple[str, ...] = ()
     manifest_unreadable: str | None = None
+    manifest_paths: tuple[Path, ...] = ()
+    #: Manifest references whose target is not a visual on disk (direction 1).
+    dangling_references: tuple[str, ...] | None = None
+    #: Cross-talk deck.yaml references (task 0026): reported, never findings.
+    external_references: tuple[dict, ...] = ()
     blocking_findings: int = 0
     advisory_findings: int = 0
 
@@ -434,6 +449,8 @@ class IndexReport:
 
     def _dangling(self) -> list[str]:
         """Manifest references naming no visual on disk (audit F6 direction 1)."""
+        if self.dangling_references is not None:
+            return sorted(self.dangling_references)
         on_disk = {r.join_slug for r in self.rows}
         return sorted(ref for ref in self.manifest_references if ref not in on_disk)
 
@@ -443,7 +460,7 @@ class IndexReport:
         them (relative to its visuals base), not the project-root form."""
         return [
             r.join_slug for r in self.rows
-            if r.latest_status == "resolving" and r.join_slug not in self.manifest_references
+            if r.latest_status == "resolving" and not r.consumer_referenced
         ]
 
     def to_json_dict(self) -> dict:
@@ -454,7 +471,9 @@ class IndexReport:
             "visuals": [r.to_dict() for r in self.rows],
             "consumer_manifest": {
                 "path": str(self.manifest_path) if self.manifest_path else None,
+                "paths": [str(p) for p in self.manifest_paths],
                 "references": list(self.manifest_references),
+                "external": list(self.external_references),
                 "dangling": self._dangling(),
                 "unreferenced": self._unreferenced(),
                 "unreadable": self.manifest_unreadable,
@@ -532,9 +551,14 @@ class IndexReport:
                 lines.append(f"  {len(slugs)} visual(s) ({shown}): {reason}")
         if self.manifest_path is not None:
             lines.append("")
+            named = (self.manifest_path.name if len(self.manifest_paths) <= 1
+                     else f"{len(self.manifest_paths)} manifests")
             lines.append(
-                f"consumer manifest: {self.manifest_path.name} — "
+                f"consumer manifest: {named} — "
                 f"{len(self.manifest_references)} visual(s) referenced")
+            if self.external_references:
+                lines.append("  external (another talk's visuals; not checked here): "
+                             + ", ".join(sorted({r["key"] for r in self.external_references})))
             if self.manifest_unreadable:
                 lines.append(f"  unreadable: {self.manifest_unreadable}")
             dangling = self._dangling()
@@ -577,29 +601,49 @@ def build_index(config_resolved) -> IndexReport:
     # for this round), bucketed by the slug convention its findings use.
     validation = validate_module.run_validation(config_resolved, slug=None)
 
-    manifest_path = config_resolved.registry_paths["consumer_manifest"]
-    refs = validate_module.consumer_manifest_refs(manifest_path)
+    # Task 0026: one or several manifests (globs expanded now). Each ref names
+    # its target directory, so the join is by directory, not by slug string —
+    # several manifests need not share one namespace.
+    manifests, _unmatched = config_module.consumer_manifest_paths(config_resolved)
+    visuals_dir = config_resolved.visuals_dir
+    all_refs = [ref for m in manifests
+                for ref in validate_module.consumer_refs(m, root, visuals_dir)]
+    local = [r for r in all_refs if r.kind == "local"]
+    refs: list[str] = []
+    for r in local:
+        if r.key not in refs:
+            refs.append(r.key)
+    referenced = {r.target.resolve() for r in local if r.target is not None}
+    on_disk = {v.resolve() for v in visual_dirs}
     # The manifest's refs name slugs relative to ITS visuals/ base, not the
-    # project root — the join runs in that namespace, the row slug in the
-    # root-relative one that validate's findings use. The base helper is
-    # validate's (promoted public alias of its private _visuals_base).
-    base = validate_module.visuals_base(manifest_path, root)
+    # project root — the join slug is in that namespace, the row slug in the
+    # root-relative one that validate's findings use. A single legacy
+    # manifest keeps its own base (validate's public visuals_base); deck.yaml
+    # keys are relative to paths.visuals.
+    primary = manifests[0] if manifests else config_resolved.registry_paths["consumer_manifest"]
+    legacy_single = len(manifests) <= 1 and not validate_module.is_deck_manifest(primary)
+    base = validate_module.visuals_base(primary, root) if legacy_single else visuals_dir
 
     report = IndexReport(
-        root=root, manifest_path=manifest_path,
+        root=root, manifest_path=primary,
         manifest_references=tuple(refs),
+        manifest_paths=tuple(manifests),
+        dangling_references=tuple(sorted({
+            r.key for r in local if r.target is None or r.target.resolve() not in on_disk})),
+        external_references=tuple(r.to_dict() for r in all_refs if r.kind == "external"),
     )
     report.blocking_findings = len(validation.blocking)
     report.advisory_findings = len(validation.advisory)
-    if manifest_path.is_file():
-        try:
-            manifest_path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            report.manifest_unreadable = str(exc)
+    for manifest in manifests:
+        if manifest.is_file():
+            try:
+                manifest.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                report.manifest_unreadable = str(exc)
 
     for vdir in visual_dirs:
         report.rows.append(
-            _row_for(vdir, root, base, refs, validation, config_resolved))
+            _row_for(vdir, root, base, referenced, validation, config_resolved))
     report.rows.sort(key=lambda r: r.slug)
     return report
 
@@ -619,7 +663,7 @@ def _row_for(
     vdir: Path,
     root: Path,
     base: Path,
-    refs: list[str],
+    referenced: set[Path],
     validation,
     config_resolved,
 ) -> Row:
@@ -630,6 +674,9 @@ def _row_for(
     latest_status, latest_target, current_version, cause = _latest_state(vdir, versions)
 
     receipt = receipt_of(vdir / current_version) if current_version else None
+    receipt_path = vdir / current_version / "receipt.json" if current_version else None
+    if receipt_path is not None and not receipt_path.is_file():
+        receipt_path = None
     staleness = staleness_of(vdir, current_version, receipt, config_resolved)
 
     blocking = advisory = 0
@@ -656,6 +703,10 @@ def _row_for(
         staleness=staleness,
         blocking_findings=blocking,
         advisory_findings=advisory,
-        consumer_referenced=join_slug in refs,
+        consumer_referenced=vdir.resolve() in referenced,
         cause=cause,
+        receipt=(receipt_path.resolve().relative_to(root.resolve()).as_posix()
+                 if receipt_path is not None else None),
+        latest_receipt_sha256=(store.sha256_file(receipt_path)
+                               if receipt_path is not None else None),
     )

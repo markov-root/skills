@@ -61,6 +61,22 @@ SCHEMA_PATH = (
 #: Registry/ledger/manifest keys, in declaration order.
 REGISTRY_KEYS = ("source_registry", "claims_ledger", "consumer_manifest")
 
+#: `paths.visuals` (task 0026): the directory, relative to the project root,
+#: that holds the visuals, `_shared/` and every scaffold. The default is the
+#: layout every project adopted before 0026 already has (`<root>/visuals/<slug>`);
+#: a standard-1 talk declares "." so its visuals live at `<talk>/visuals/<slug>`.
+DEFAULT_VISUALS_DIR = "visuals"
+
+#: Glob metacharacters: a consumer_manifest entry containing none of them is a
+#: literal path (and a missing literal is still reported by the join, exactly
+#: as before 0026); one containing any is expanded at use time.
+_GLOB_CHARS = frozenset("*?[")
+
+#: Marker of a standard-1 talk (presentation skill ADR 0002): a visuals project
+#: whose parent holds `audience/talk.yaml` is that talk's `visuals/` directory.
+TALK_MARKER = ("audience", "talk.yaml")
+TALK_CONSUMER_GLOB = "../modules/*/deck/deck.yaml"
+
 SAFE_AREA_KEYS = ("top", "right", "bottom", "left")
 
 # Names selected by visuals.toml but evaluated only by `visuals check`.
@@ -155,6 +171,12 @@ class ResolvedConfig:
     web_root: Path  # the directory served as the web root at render time (task 0017)
     styles: dict[str, str]  # declared name -> human description; no defaults or inheritance
     scaffold_wiring: dict[str, ScaffoldWiring]  # project-owned emission, keyed by style
+    #: Task 0026. The directory holding visuals, `_shared/` and scaffolds:
+    #: `<root>/visuals` unless `paths.visuals` says otherwise ("." = root).
+    visuals_dir: Path
+    #: Task 0026. `paths.consumer_manifest` exactly as declared, normalised to a
+    #: tuple: one literal path, or glob patterns, relative to the root.
+    consumer_manifest_patterns: tuple[str, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -349,9 +371,23 @@ def _validate_theme(data: dict[str, Any], file: Path, lines: dict[tuple[str, ...
     _fail("theme", "a name, a path (string), or an inline token table (ADR 0005 steps 1-3)", file, lines)
 
 
+def _inside(candidate: Path, root: Path) -> bool:
+    root_resolved = root.resolve()
+    return candidate == root_resolved or root_resolved in candidate.parents
+
+
 def _validate_paths(
     data: dict[str, Any], root: Path, file: Path, lines: dict[tuple[str, ...], int]
-) -> dict[str, Path]:
+) -> tuple[dict[str, Path], Path, tuple[str, ...]]:
+    """Returns (registry_paths, visuals_dir, consumer_manifest_patterns).
+
+    `consumer_manifest` (task 0026) is one path or a list of glob patterns and
+    is the only key allowed to leave the root with `..`: a standard-1 talk's
+    decks sit beside its visuals project, not inside it. For a list, the
+    `registry_paths["consumer_manifest"]` entry is the FIRST pattern joined to
+    the root — a legacy single-manifest view kept so pre-0026 callers still get
+    a Path; the join itself reads every pattern (`consumer_manifest_paths`).
+    """
     paths = data.get("paths")
     if paths is None:
         _fail("paths", f"a [paths] table with {', '.join(REGISTRY_KEYS)}", file, lines)
@@ -360,18 +396,84 @@ def _validate_paths(
     pschema = _load_schema()["properties"]["paths"]
     _unexpected_keys(paths, pschema, "paths", file, lines)
     resolved: dict[str, Path] = {}
+    patterns: tuple[str, ...] = ()
     for key in REGISTRY_KEYS:
         if key not in paths:
             _fail(f"paths.{key}", "required and missing", file, lines)
         value = paths[key]
+        if key == "consumer_manifest":
+            patterns = _consumer_patterns(value, file, lines)
+            resolved[key] = (root / patterns[0]).resolve() if not _is_glob(patterns[0]) \
+                else root.resolve() / patterns[0]
+            continue
         if not isinstance(value, str) or not value:
             _fail(f"paths.{key}", "a path relative to the project root", file, lines)
         candidate = (root / value).resolve()
-        root_resolved = root.resolve()
-        if candidate != root_resolved and root_resolved not in candidate.parents:
+        if not _inside(candidate, root):
             _fail(f"paths.{key}", "a path inside the project root (no escaping it)", file, lines)
         resolved[key] = candidate
-    return resolved
+    visuals_value = paths.get("visuals", DEFAULT_VISUALS_DIR)
+    if not isinstance(visuals_value, str) or not visuals_value:
+        _fail("paths.visuals", "a directory relative to the project root holding the "
+              'visuals and _shared/ (default "visuals"; "." for the root itself)', file, lines)
+    visuals_dir = (root / visuals_value).resolve()
+    if not _inside(visuals_dir, root):
+        _fail("paths.visuals", "a directory inside the project root (no escaping it)", file, lines)
+    return resolved, visuals_dir, patterns
+
+
+def _is_glob(pattern: str) -> bool:
+    return any(ch in _GLOB_CHARS for ch in pattern)
+
+
+def _consumer_patterns(value: Any, file: Path, lines: dict[tuple[str, ...], int]) -> tuple[str, ...]:
+    expected = ("a path, or a non-empty list of glob patterns, relative to the project "
+                "root (`..` allowed; absolute paths are not)")
+    items = [value] if isinstance(value, str) else value
+    if not isinstance(items, list) or not items:
+        _fail("paths.consumer_manifest", expected, file, lines)
+    for index, item in enumerate(items):
+        where = "paths.consumer_manifest" if isinstance(value, str) else f"paths.consumer_manifest[{index}]"
+        if not isinstance(item, str) or not item or Path(item).is_absolute() or item.startswith("~"):
+            _fail(where, expected, file, lines)
+    return tuple(items)
+
+
+def consumer_manifest_paths(config_resolved: "ResolvedConfig") -> tuple[tuple[Path, ...], tuple[str, ...]]:
+    """(manifest paths, patterns that matched nothing), expanded at call time.
+
+    A literal entry is returned whether or not it exists, so the consumer join
+    still reports a missing manifest by name (pre-0026 behaviour, AC-3). A glob
+    entry contributes its sorted matches (files only); one that matches nothing
+    is returned in the second tuple for the join to report. Order is
+    declaration order, duplicates dropped.
+    """
+    import glob as glob_module  # noqa: PLC0415 - only the join expands patterns
+
+    root = config_resolved.root.resolve()
+    found: list[Path] = []
+    unmatched: list[str] = []
+    for pattern in config_resolved.consumer_manifest_patterns:
+        if not _is_glob(pattern):
+            hits = [(root / pattern).resolve()]
+        else:
+            hits = sorted(
+                Path(p).resolve()
+                for p in glob_module.glob(str(root / pattern), recursive=True)
+                if Path(p).is_file()
+            )
+            if not hits:
+                unmatched.append(pattern)
+        for hit in hits:
+            if hit not in found:
+                found.append(hit)
+    return tuple(found), tuple(unmatched)
+
+
+def is_talk_visuals_dir(directory: Path) -> bool:
+    """True when `directory` is a standard-1 talk's `visuals/` project root:
+    its parent holds `audience/talk.yaml` (presentation skill ADR 0002)."""
+    return directory.resolve().parent.joinpath(*TALK_MARKER).is_file()
 
 
 def _validate_web_root(
@@ -604,7 +706,7 @@ def _validate(
 
     profiles, default = _validate_canvas(data, file, lines)
     theme = _validate_theme(data, file, lines)
-    registry_paths = _validate_paths(data, root, file, lines)
+    registry_paths, visuals_dir, consumer_patterns = _validate_paths(data, root, file, lines)
     hooks = _validate_hooks(data, root, file, lines)
     advisory = _validate_advisory(data, file, lines)
     check_thresholds = _validate_check_thresholds(data, file, lines)
@@ -628,6 +730,8 @@ def _validate(
         web_root=web_root,
         styles=styles,
         scaffold_wiring=scaffold_wiring,
+        visuals_dir=visuals_dir,
+        consumer_manifest_patterns=consumer_patterns,
     )
 
 
@@ -866,11 +970,17 @@ def _discover_theme(root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def scaffold_body() -> dict[str, Any]:
+def scaffold_body(talk: bool = False) -> dict[str, Any]:
     """The empty-directory scaffold: one neutral profile, zero insets, no
     hooks, no advisory selection, default theme. Geometry and contract wiring
-    only — no borrowed compositional opinion (ADR 0004)."""
+    only — no borrowed compositional opinion (ADR 0004).
+
+    `talk=True` (task 0026) is the standard-1 talk layout: the project root IS
+    `<talk>/visuals/`, so visuals live directly under it (`paths.visuals =
+    "."`), contract files under `_shared/`, and the consumers are every
+    module's `deck.yaml` beside it."""
     width, height = SHARED_RENDERER_DEFAULT
+    prefix = "" if talk else "visuals/"
     return {
         "canvas": {
             "default": CORPUS_PROFILE_SLIDE,
@@ -885,13 +995,21 @@ def scaffold_body() -> dict[str, Any]:
             },
         },
         "theme": "neutral",  # the bundled brand-neutral default; must resolve out of the box
-        "paths": {key: f"visuals/_shared/{name}" for key, name in (
+        "paths": {key: f"{prefix}_shared/{name}" for key, name in (
             ("source_registry", "sources.json"),
             ("claims_ledger", "CLAIMS.md"),
             ("consumer_manifest", "SLIDES.md"),
-        )},
+        )} if not talk else {
+            "source_registry": "_shared/sources.json",
+            "claims_ledger": "_shared/CLAIMS.md",
+            "consumer_manifest": [TALK_CONSUMER_GLOB],
+            "visuals": ".",
+        },
         "hooks": [],
-        "advisory_checks": [],
+        # The talk layout declares a consumer join, so it selects the one
+        # advisory check that reconciles it; a contract check, not a design
+        # opinion (ADR 0004). Plain scaffolds still select nothing.
+        "advisory_checks": ["consumer-join"] if talk else [],
         "check_thresholds": {},
     }
 
@@ -955,7 +1073,11 @@ def to_toml(body: dict[str, Any]) -> str:
     out.append("[paths]")
     for key in REGISTRY_KEYS:
         note = " # not found — fill this in" if key in body.get("_undiscovered_paths", ()) else ""
-        out.append(f'{key} = "{body["paths"][key]}"{note}')
+        value = body["paths"][key]
+        rendered = _toml_array(list(value)) if isinstance(value, (list, tuple)) else f'"{value}"'
+        out.append(f"{key} = {rendered}{note}")
+    if "visuals" in body["paths"]:
+        out.append(f'visuals = "{body["paths"]["visuals"]}" # visuals and _shared/ live here')
     out.append("")
 
     for hook in body.get("hooks", ()):

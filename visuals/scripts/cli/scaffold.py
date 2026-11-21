@@ -141,6 +141,15 @@ def _check_slug(slug: str) -> list[str]:
     return parts
 
 
+def visuals_dir_of(config_resolved) -> Path:
+    """Where visuals and `_shared/` live: the config's `paths.visuals`
+    (task 0026), `<root>/visuals` when a config predates that key."""
+    declared = getattr(config_resolved, "visuals_dir", None)
+    if declared is not None:
+        return Path(declared)
+    return Path(config_resolved.root) / VISUALS_DIR
+
+
 def _template(name: str) -> str:
     path = SCAFFOLD_ASSETS / name
     if not path.is_file():
@@ -209,10 +218,10 @@ def plan_scaffold(config_resolved, kind: str, slug: str, force: bool) -> Scaffol
         )
     parts = _check_slug(slug)
 
-    root = Path(config_resolved.root)
-    visual_dir = root.joinpath(VISUALS_DIR, *parts)
+    base = visuals_dir_of(config_resolved)
+    visual_dir = base.joinpath(*parts)
     source_dir = visual_dir / SOURCE_DIR_NAME
-    shared_css = root / VISUALS_DIR / SHARED_DIR / THEME_CSS_NAME
+    shared_css = base / SHARED_DIR / THEME_CSS_NAME
 
     if visual_dir.exists() and not force:
         raise ScaffoldRefused(

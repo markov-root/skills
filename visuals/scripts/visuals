@@ -1,19 +1,37 @@
-#!/usr/bin/env bash
-# Single entry point for the `visuals` skill.
-#
-# Deliberately thin: this dispatcher carries NO command list, NO usage text, and
-# NO weight-routing case. Everything command-shaped — parsing, dispatch, help,
-# command listing, and stdlib-vs-uv dependency-weight routing — is derived at
-# runtime from the one static command registry (scripts/cli/registry.py), which
-# is the only command catalog in the artifact. Bash only locates the CLI and
-# execs it.
-set -euo pipefail
+#!/usr/bin/env python3
+# skill-feedback-managed-wrapper: v1
+# metadata: {"feature":"cli","schema":1,"skill":"visuals","success_exit_codes":[],"target":"cli/visuals"}
+"""Generated adapter. Reconcile with `skill-feedback wrapper --apply`."""
+from __future__ import annotations
 
-here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+import os
+import shutil
+import sys
+from pathlib import Path
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "error: visuals needs python3 (stdlib only for the dispatcher); python3 not on PATH." >&2
-  exit 3
-fi
-
-exec python3 "$here/cli/main.py" "$@"
+_SKILL = 'visuals'
+_FEATURE = 'cli'
+_SUCCESS_EXIT_CODES = ()
+_TARGET = (Path(__file__).resolve().parent / 'cli/visuals').resolve()
+_COMMAND = [str(_TARGET), *sys.argv[1:]]
+_RUN_OPTIONS = [
+    item
+    for code in _SUCCESS_EXIT_CODES
+    for item in ("--success-exit-code", str(code))
+]
+_FEEDBACK = shutil.which("skill-feedback")
+if _FEEDBACK is None or Path(_FEEDBACK).resolve() == Path(__file__).resolve():
+    os.execv(str(_TARGET), _COMMAND)
+os.execv(
+    _FEEDBACK,
+    [
+        _FEEDBACK,
+        "run",
+        _SKILL,
+        "--feature",
+        _FEATURE,
+        *_RUN_OPTIONS,
+        "--",
+        *_COMMAND,
+    ],
+)

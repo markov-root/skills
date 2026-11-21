@@ -126,6 +126,47 @@ rhythm, neutralizes idiom, and tidies structure _is_ the tell being introduced.
 Edit toward the author's specificity and voice (add a real detail, keep an odd
 true phrase), not toward frictionless uniformity.
 
+## Detector signals are not tic lists
+
+A detector reads the whole distribution of a passage, not its banned words. In a
+model-report corpus (2026-11, Pangram 4.1), agent-drafted sections averaged 78% of
+words flagged while containing almost none of the lexical watch-list above. In
+human-rated windows, parentheses, dashes, semicolons, and "we" were two to four
+times more common. Elliptical back-references ("did so", "the same") and
+possessives were more common in AI-rated windows. In one case, sections an agent
+drafted scored 54–92% AI even after tic removal. The lead editor's hand rewrites of the same facts scored 0–3%.
+The rewrites broke enumerating sentences into lists, cut chains of numbers, used
+"we", explained for a lay reader, and kept colons and asides. Some of those moves
+broke the house conventions then in use. What moved the detector was **human-built
+sentences over agent-supplied facts**, not a cleaner word list. So when the opt-in
+screen (`scripts/pangram.py`) flags a window:
+
+- treat the window as a place to rebuild the sentences: reorder by the reader's
+  question, vary length and shape, and add the specific claim, stance, or example
+  the passage is missing;
+- don't swap synonyms or delete tics and re-check; that is laundering, and it
+  fails twice (meaning drifts and detectors still catch it; DAMAGE);
+- keep the house conventions unless the writer chooses otherwise. A detector score
+  never overrides voice or genre rules on its own;
+- log the before and after with `--pair-of`, so the corpus learns which moves
+  worked.
+
+This catalogue is meant to be measured over time, not to grow without limit. The
+corpus is a private log of detector checks (ADR 0009):
+
+- `pangram.py corpus terms` reports whether each watch-list entry above actually
+  predicts AI-labelled windows;
+- `corpus style` compares topic-robust features (punctuation, "we", rhythm,
+  back-references) between AI-rated and human-rated text, or between the before
+  and after of real rewrites (`--by pairs`);
+- `corpus mine` proposes candidate words and phrases by contrastive log-odds.
+  Within a single document it picks up topic rather than style, so treat its
+  output as a lead to read, not a tell.
+
+Add, demote, or retire an entry only on that evidence plus a read of the
+examples in context. Note the corpus size and the detector version behind the
+change.
+
 ## The real fix (not synonym-swapping)
 
 Next-token prediction favors high-probability continuations (safe transitions,

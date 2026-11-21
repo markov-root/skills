@@ -10,7 +10,8 @@ description: >-
   voice and genre by what is being written, and holds a fact-integrity floor:
   never invent a study, statistic, date, author, or citation to sound specific.
   Use when drafting, rewriting, editing, or reviewing essays, articles,
-  explainers, posts, emails, reports, docs, or scripts for a human audience. Do
+  explainers, posts, emails, reports, docs, talk and presentation scripts, or
+  speaker notes for a human audience. Do
   NOT use for machine-facing text or prompt/system-instruction authoring (that is
   prompt-engineering's domain), for drawing out an under-specified task (that is
   elicit), or for trivial fully-specified one-liners.
@@ -19,10 +20,12 @@ compatibility: >-
   Instruction-first. Ships a few small stdlib-only measurement scripts
   (fact-integrity/source wall, voice fingerprint, trace map) with no runtime
   service dependencies; the optional Vale style pack additionally needs the Vale
-  binary. Uses the harness's own file and shell tools.
+  binary. The opt-in detector screen (scripts/pangram.py) calls the Pangram
+  API over the network and needs PANGRAM_API_KEY. Uses the harness's own file
+  and shell tools.
 metadata:
   author: markov-root
-  version: "0.5.1"
+  version: "0.11.0"
 ---
 
 # writing
@@ -57,6 +60,12 @@ you can rather than filling out a form. A rigid template re-imposed on every
 request _is_ the sameness the skill fights.
 
 ### 1. Frame — the reader contract
+
+**First, discover installed voices.** List `knowledge/` and read each module's
+`voice_scope` frontmatter before drafting anything, even when the task arrives
+framed as setup (bootstrapping a talk folder, scaffolding a script). A matching
+scope (for example a `presentation` scope for a talk script, speech, or speaker
+notes) overrides the general default.
 
 Before writing, pin down what the piece must do — inferring what you can and
 **restating it in one line** for a clear ask, rather than interrogating the user:
@@ -132,6 +141,10 @@ Each labeled by **evidence class**, so a proxy is never mistaken for proof:
    resolving a marker is not itself proof the claim is true.
 3. **Voice & preservation** _(review signal)_ — does it keep protected meaning,
    idiolect, and genre-appropriate surface? Absorbs lexical hygiene.
+   After a re-voice pass over a slide-sectioned script, `scripts/revoice_check.py
+   BEFORE.md AFTER.md` lists every number, direct quotation, and `## <slide-id>`
+   heading the new version lost or altered (exit 1 on loss); `--annotations`
+   also flags stand-off anchors whose quoted span is gone.
 
 Two **screens** — reported as **divergence from the author's own same-genre
 baseline**, never as a score, never as a gate: readability/length and lexical
@@ -143,6 +156,23 @@ connective overuse (`scripts/connectives.py`), sentence-opener/expletive
 alongside the voice fingerprint (`scripts/voice_fingerprint.py`). Each metric is a
 divergence from baseline, **never an aggregate score**. A screen flags for review;
 it never blocks and never auto-fixes.
+
+**Detector screen (opt-in; only when the user asks).** `scripts/pangram.py check
+DRAFT.md --provenance agent|human|agent-human-edit|human-agent-edit` sends the
+prose to the Pangram API and lists the most AI-like windows with line anchors. It
+is one detector's opinion, never a gate, and never a verdict about who wrote the
+text (ADRs 0006, 0009). It costs money and sends text to a third party, so run it
+only on request (`--dry-run` shows words and cost first; `--no-log` for text that
+must not be kept). Every check is logged to a private corpus. Always pass the true
+`--provenance`, and `--pair-of <id>` when checking a revision of an earlier check;
+those rows are the dataset. It reads `.md`, `.tex` (markup stripped) and plain
+text, and reports the six-category reading (AI, likely AI, AI-assisted, likely
+AI-assisted, likely human, human) with an OK/Review/Rewrite status.
+`corpus style`, `corpus terms` and `corpus mine` turn the corpus into evidence for
+[`knowledge/ai-tells.md`](knowledge/ai-tells.md); `corpus import` and `corpus label`
+bring in earlier Pangram results and add provenance later. Respond to
+flagged windows with the real fix (see "Detector signals" there), not word
+laundering.
 
 #### Critics veto, never approve; the writer closes
 
@@ -226,7 +256,8 @@ voice at Frame:
 `scripts/voice_fingerprint.py` measures a draft against _accepted_ passages, so
 voice stays measurable without an AI detector, and the skill never emits an
 "AI-written" verdict about an author. (An opt-in self-adversarial detector screen
-on your _own_ draft is a separate, deliberate choice — ADR 0006.)
+on your _own_ draft is a separate, deliberate choice — ADR 0006,
+`scripts/pangram.py`.)
 
 Writeup-specific voice modules are tagged `visibility: private`: they install
 locally but are **excluded from any public export**, and `SKILL.md` never links to
