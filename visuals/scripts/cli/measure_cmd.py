@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pillow>=10"]
+# ///
 """`visuals measure` command adapter; measurement belongs to measure.py."""
 
 from __future__ import annotations

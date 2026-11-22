@@ -193,6 +193,14 @@ def _derived_theme_css(config_resolved) -> tuple[str, str]:
         raise ScaffoldRefused(
             f"the project theme could not be resolved: {exc}", exit_code=3
         ) from exc
+    except theme.ThemeSchemaError as exc:
+        # A schema-invalid theme is the author's input to fix, not an absent
+        # capability: exit 2 and name the key, as `visuals theme check` does.
+        raise ScaffoldRefused(
+            f"the project theme is invalid: {exc}; run `visuals theme check` "
+            "for every problem in it",
+            exit_code=2,
+        ) from None
     steps = ", ".join(resolved.steps_consulted) or "no steps consulted"
     header = (
         f"/* visuals shared stylesheet — derived, not authored.\n"

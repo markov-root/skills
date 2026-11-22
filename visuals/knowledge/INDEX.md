@@ -56,10 +56,10 @@ theme and declared style.
 | Read this                                          | When you are…                                                                                        |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | [`numbers-and-claims.md`](numbers-and-claims.md)   | putting any figure on a graphic — **read this one first, and read it even if you read nothing else** |
-| [`composition.md`](composition.md)                 | choosing a canvas, laying out chart against commentary, or deciding where anything sits              |
+| [`composition.md`](composition.md)                 | choosing a canvas, laying out chart against commentary, deciding where anything sits, or sizing a quote card and its variants |
 | [`progressive-builds.md`](progressive-builds.md)   | building a graphic revealed in stages across several slides                                          |
 | [`encoding-and-colour.md`](encoding-and-colour.md) | choosing a chart form, assigning series colours, or building a legend                                |
-| [`annotation.md`](annotation.md)                   | labelling series or data points, or resolving label collisions                                       |
+| [`annotation.md`](annotation.md)                   | labelling series or data points, resolving label collisions, or styling a `<use>`-cloned SVG mark    |
 | [`axes-and-sidebar.md`](axes-and-sidebar.md)       | naming axes and units, or writing the commentary that sits beside the chart                          |
 | [`source-credit.md`](source-credit.md)             | attributing data, placing logos, or handling a licence                                               |
 | [`release-check.md`](release-check.md)             | deciding whether a graphic is finished                                                               |

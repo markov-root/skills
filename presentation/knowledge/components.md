@@ -22,6 +22,10 @@ footers, and the rest.
   for an organisation.
 - `agent_grid`: `legend`, and speech `bubbles` pointing at one agent's square.
 - `chart_xy`: `band` series for uncertainty fans (±1σ/±2σ), drawn behind the lines.
+- **The rail-less full-width chart** (lesson 0008): `takeaway_below: true` on a chart slide
+  (with no `rail`) drops the side panel and the divider — the visual spans the full content
+  width and the takeaway renders as one line under the content; omit `takeaway` and the title
+  carries it instead. Default slides that pass a `rail` are unchanged.
 - Preview before a version: `present deck build --dry-run --out <dir>` (full-size page PNGs).
 - Known gaps (filed): date axes with `major=365.25` can label a year twice (start `lo` on the 2nd
   of January); `rail` blocks do not stop at the content bottom; `callout` width is estimated.

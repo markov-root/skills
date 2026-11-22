@@ -1,9 +1,12 @@
 """Deck data from `dataset:` references, as snapshots (task 0022; portfolio ADR 0006 decision 3).
 
-A `slides.yaml` value may be a dataset reference:
+A `slides.yaml` value may be a dataset reference, written in the canonical grammar
+`dataset:<id>[@<release>][.<table>][#<key>]` (task 0024); the aliases `data:` and the old
+`/<table>` separator are accepted and never emitted — snapshots and receipts record the
+canonical form:
 
-- `"dataset:<id>[@<release>]/<table>"` → the table's rows, a list of row mappings;
-- `"dataset:<id>[@<release>]/<table>#<row-ref>"` → that one row, a mapping;
+- `"dataset:<id>[@<release>].<table>"` → the table's rows, a list of row mappings;
+- `"dataset:<id>[@<release>].<table>#<key>"` → that one row, a mapping;
 - `{from: "dataset:…", column: <name>}` → that column only (a list for a table, a value for a row).
 
 Before a build the CLI process snapshots each reference into the deck's `src/data/` as one JSON
@@ -34,13 +37,14 @@ class SnapshotError(Exception):
 
 
 def _ref_of(value: Any) -> tuple[str, str | None] | None:
-    """(reference text, column) when `value` is a deck data reference."""
-    if isinstance(value, str) and value.startswith("dataset:"):
+    """(reference text, column) when `value` is a deck data reference; `data:` is an
+    accepted alias of the canonical `dataset:` prefix."""
+    if isinstance(value, str) and value.startswith(("dataset:", "data:")):
         return value, None
     if (
         isinstance(value, dict)
         and isinstance(value.get("from"), str)
-        and value["from"].startswith("dataset:")
+        and value["from"].startswith(("dataset:", "data:"))
         and set(value) <= {"from", "column"}
     ):
         return value["from"], value.get("column")
@@ -83,7 +87,8 @@ def _fetch(ref: references.Ref, resolver: references.Resolver) -> dict[str, Any]
     if not ref.table:
         raise SnapshotError(
             "data_reference_invalid",
-            f"{ref.raw}: deck data needs a table (dataset:<id>[@<release>]/<table>[#<row>])",
+            f"{ref.raw}: deck data needs a table "
+            "(dataset:<id>[@<release>].<table>[#<key>])",
         )
     r = resolver.resolve(ref)
     if r.status == "unavailable":
@@ -131,7 +136,7 @@ def _fetch(ref: references.Ref, resolver: references.Resolver) -> dict[str, Any]
     )
     return {
         "schema_version": 1,
-        "reference": ref.raw,
+        "reference": ref.text(),  # canonical form, whatever alias the slide wrote
         "dataset": ref.target,
         "release": release,
         "table": ref.table,
@@ -210,7 +215,7 @@ def prepare(
             changed = True
         records.append(
             {
-                "reference": text,
+                "reference": ref.text(),  # canonical form, whatever alias the slide wrote
                 **{
                     k: entry[k]
                     for k in ("dataset", "release", "table", "path", "rows", "sha256")

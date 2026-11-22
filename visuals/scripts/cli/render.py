@@ -121,6 +121,10 @@ class RenderError(Exception):
     """A blocking render failure. The message names the cause; never a traceback."""
 
 
+class RenderInputError(RenderError):
+    """The project's own input is invalid (exit 2); fix the named key."""
+
+
 class RenderUnavailable(RenderError):
     """The environment cannot render (e.g. no browser). Exit code 3, not 1."""
 
@@ -1097,6 +1101,14 @@ def _resolve_theme_receipt(config, config_resolved) -> dict:
     theme_ref = config_resolved.theme  # str name/path or inline Mapping (ruling 2)
     try:
         resolved_theme = theme.resolve_theme(theme_ref, config_resolved)
+    except theme.ThemeSchemaError as exc:
+        # An invalid theme is an input error, not an unavailable capability:
+        # recording `resolution: unavailable` would ship a render that silently
+        # ignored the project's declared theme (task 0027).
+        raise RenderInputError(
+            f"the project theme is invalid: {exc}; run `visuals theme check` "
+            "for every problem in it"
+        ) from None
     except Exception as exc:
         return {"resolution": "unavailable", "note": f"theme could not be resolved: {exc}"}
     tokens_json = json.dumps(resolved_theme.tokens, sort_keys=True, default=str)

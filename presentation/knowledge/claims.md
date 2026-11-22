@@ -25,10 +25,13 @@ by line]`
 A `Source` cell may cite the evidence by a typed reference instead of, or beside, free text.
 The reference then resolves through its owner's CLI:
 
-| Reference | Cites | Resolved by |
-| --- | --- | --- |
-| `research:<ref>[@<version>]` | a corpus record, e.g. `research:deepmind/frontier-safety@1` | `research cite` |
-| `dataset:<id>[@<release>][/<table>[#<row-ref>]]` | a dataset release, table or row | `datasets releases`, `datasets get` |
+Write the canonical forms (portfolio ADR 0006 as amended 2026-11-21; research ADR 0008 decision 5).
+The older aliases are accepted as input and never emitted:
+
+| Canonical reference | Cites | Accepted aliases | Resolved by |
+| --- | --- | --- | --- |
+| `literature:<ref>[@vN]` | a corpus record, e.g. `literature:deepmind/frontier-safety@v1` | `research:<ref>[@<version>]`, `lit:` | `research cite` |
+| `dataset:<id>[@<release>][.<table>][#<key>]` | a dataset release, table or row, e.g. `dataset:chips@20261110T000000Z-bbbb.by_lab#Alpha` | `data:`, and the old `/<table>` separator | `research dataset releases/get`, or a standalone `datasets` binary |
 
 - **Draft without a version; pin before you approve.** `present claims pin` lists the exact
   version each unpinned reference resolves to. Add `--apply` to write them into the ledger. It
@@ -43,14 +46,15 @@ The reference then resolves through its owner's CLI:
   Neither CLI is consulted for a ledger that holds no references of its type. `present doctor`
   shows where each CLI was found. Set `PRESENT_RESEARCH_CLI` or `PRESENT_DATASETS_CLI` to point
   at one explicitly, or to an empty value to switch it off.
-- **Deck data uses the same references.** In `slides.yaml`, `"dataset:<id>[@<release>]/<table>"`
-  stands for the table's rows and `…#<row-ref>` for one row. `{from: "dataset:…", column: <name>}`
-  stands for one column. `deck build` snapshots each one into `src/data/` with its release, every
-  row's reference and its sha256, records it in `src/data/datasets.lock.json`, and lists it in the
-  receipt under `inputs.datasets`. Later builds read the snapshot and never query `datasets`, so a
-  rebuild works without it. An unpinned reference keeps its first release until you delete its
-  lock entry. Commit the snapshot with the deck. `[enforced: present deck build — an edited
-  snapshot is refused]`
+- **Deck data uses the same references.** In `slides.yaml`, `"dataset:<id>[@<release>].<table>"`
+  stands for the table's rows and `…#<key>` for one row (`data:` and the old `/<table>` form are
+  accepted aliases). `{from: "dataset:…", column: <name>}` stands for one column. `deck build`
+  snapshots each one into `src/data/` with its release, every row's reference and its sha256,
+  records it in `src/data/datasets.lock.json`, and lists it in the receipt under
+  `inputs.datasets` (the receipt's `reference` is always the canonical form). Later builds read
+  the snapshot and never query the dataset surface, so a rebuild works without it. An unpinned
+  reference keeps its first release until you delete its lock entry. Commit the snapshot with the
+  deck. `[enforced: present deck build — an edited snapshot is refused]`
 
 ## The check is advisory
 

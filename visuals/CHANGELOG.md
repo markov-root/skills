@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.10.0 — 2026-11-22
+
+Measurement completes (tasks 0011 and 0012), and two fixes.
+
+- `measure`: a **twin-render pixel oracle** gives every visible text line a background and a
+  contrast. The frame is loaded in a second browser target with only glyph paint hidden
+  (text fill, stroke, shadow, decoration — properties that cannot move layout); the twin's element
+  geometry must equal the measured page's or the oracle is refused, and the pixels behind each
+  text line are sampled. Image backgrounds, filters, blend modes and partial pseudo-elements,
+  previously `null`, are now measured; where CSS composition succeeds, the report also records
+  its agreement with the pixels (`css_delta`). The worst-case contrast is taken over every
+  sampled pixel. Opacity on an unpainted ancestor group is folded into the text colour; a
+  filter, blend mode, or opacity over a painted group leaves contrast `null` with a stated
+  reason. The measured page is never modified (the byte-identical screenshot proof is unchanged).
+  New report fields: `lines`, `foreground_effects`, `foreground_opacity`, `background_pixels`,
+  per-frame `pixel_oracle` and `font_faces`, and per-mark non-colour `channels`.
+  `measure` now runs under `uv` (Pillow).
+- `check`: the ADR 0004 **clipped-content blocker is evaluated from measured geometry** for
+  every visual: visible text whose glyph band, or an annotated data mark, extends past the canvas
+  makes `check` exit 1. Line-height half-leading past the edge and decorative full-bleed layers do
+  not block (the latter stays the `geometry-overflow` advisory).
+- `check` **colour-only-encoding** is now measured: series of annotated marks pass when they
+  differ by a non-colour channel (element, dash, marker, pattern, symbol, declared `data-shape`)
+  or carry a direct label within the new `check_thresholds.direct_label_max_distance_px`; a
+  colour-keyed legend does not count.
+- `check` **resolved-font-fallback** decides cases it used to leave unknown, from the page's own
+  `@font-face` load status: a failed webfont or an absent system family is a finding; a loaded
+  alias rendered by a custom face passes; generic families pass.
+- `new` and `render` fail cleanly on a schema-invalid project theme (task 0027): exit 2, the
+  offending key and file named, nothing written, no traceback. `render` no longer ships a
+  version with `resolution: unavailable` when the declared theme is invalid.
+- An independent review before release reproduced six defects in the above, all fixed with
+  regression tests (`dev/tests/test_review_regressions.py`): the blocker missed text cut off below
+  a long paragraph's 32nd line (the union box is now always tested); SVG text was measured with
+  `color` instead of `fill`, and a CSS background contradicted by the pixels was kept (the pixels
+  now win above a 3-level tolerance, the overruled value stays on record as `css_overruled`);
+  opacity was folded over a group holding a painted sibling (paint anywhere in the group under
+  the text now blocks folding); gradient-clipped text (`background-clip: text`) leaked glyph
+  paint into the twin (now an explicit unknown); off-screen accessibility text and text already
+  cut by an `overflow`-clipping ancestor blocked (text is now cut to `clip_box`, and text that
+  never meets the canvas or sits under `clip`/`clip-path` does not block); gradient fills counted
+  as a non-colour channel (references now count only by the geometry they draw, and any shared
+  mark kind means a shared channel). A failing twin render now leaves `pixel_oracle` unavailable
+  instead of aborting `measure`.
+- Knowledge corpus (task 0028): worked decision examples added — multi-source chart reconciliation
+  (`numbers-and-claims.md` §3) and matrix non-score states (§4); a density-at-delivery-size decision
+  procedure (`release-check.md` §3); quote-card length and variants, and a visual spine across mixed
+  scenes (`composition.md` §6, §8). New sourced technical note on styling `<use>`-cloned SVG marks
+  (`annotation.md` §9), routed from `knowledge/INDEX.md` and provenance-registered in
+  `references/SOURCES.md` (`src-svg2`, `src-mdn`).
+
 
 ## 0.9.2 — 2026-11-21
 

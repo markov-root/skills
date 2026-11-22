@@ -50,6 +50,22 @@ anything whose contrast was marginal.
 fix. Reflowing the layout, changing the type hierarchy, or raising contrast may recover it; if none
 of those do, the graphic is carrying more than it can at this size, and something comes out.
 
+**A density decision procedure for a fixed canvas.** Where both the content and the canvas are fixed
+— a set of published lines, a full matrix, a slide — decide density before building, not by eye
+afterwards:
+
+1. **List what must survive at delivery size:** every line, label, tick, cell state, and note the
+   argument actually uses.
+2. **Rank what is left.** Anything supplying context but carrying no step of the argument gets a
+   weaker treatment or moves to the commentary — before it is drawn, not after it collides.
+3. **Build, then run the delivery-size look above.** Anything on the list that fails to resolve is
+   a defect in the plan: remove or relocate an element rather than shrinking type or thinning
+   strokes. The composite is the thing being judged — elements added one at a time each look fine
+   at full size, and the sum is unreadable where it will actually be seen.
+
+See [`numbers-and-claims.md`](numbers-and-claims.md) §3 for the matching decision on how much of
+that content each canvas element carries.
+
 ## 3b. Check it is *finished*, not merely correct `[core]`
 
 A graphic can satisfy every rule in this knowledge and still be thin. This is the most common way a

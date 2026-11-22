@@ -118,6 +118,10 @@
         "left"
       ]
     },
+    "takeaway_below": {
+      "type": "boolean",
+      "description": "rail-less full-width chart (lesson 0008): no side panel or divider; the visual spans the full content width and the takeaway renders as one line under the content — omit `takeaway` and the title carries it instead. Cannot be combined with `rail`."
+    },
     "rail_sync": {
       "oneOf": [
         {

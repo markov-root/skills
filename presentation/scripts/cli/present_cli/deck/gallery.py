@@ -82,6 +82,38 @@ SLIDES: list[dict[str, Any]] = [
         },
     },
     {
+        "id": "chart-xy-wide",
+        "component": "chart_xy",
+        "with": {
+            "title": "Fixes double every month",
+            "sources": DS,
+            "takeaway": "Fixes keep doubling.",
+            "takeaway_below": True,
+            "series": [
+                {
+                    "name": "frontier",
+                    "points": [
+                        ["@date:2024-01-01", 3],
+                        ["@date:2025-01-01", 7],
+                        ["@date:2026-01-01", 14],
+                    ],
+                    "color": "@ink",
+                    "line": True,
+                    "marker": "circle",
+                    "size": 8,
+                },
+            ],
+            "x_axis": {
+                "lo": "@date:2024-01-01",
+                "hi": "@date:2026-07-01",
+                "major": 182,
+                "fmt": "yyyy",
+            },
+            "y_axis": {"lo": 0, "hi": 20, "major": 5},
+            "legend": [["line", "@ink", "Fixes per month"]],
+        },
+    },
+    {
         "id": "chart-line",
         "component": "chart_line",
         "with": {

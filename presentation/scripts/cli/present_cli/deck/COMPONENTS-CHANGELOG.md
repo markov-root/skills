@@ -4,6 +4,22 @@
 carries the `present components diff` summary against the previous release's gallery (task 0016).
 An unexplained visible change fails the dev suite.
 
+## 1.5.0 — 2026-11-22
+
+The takeaway side rail is a per-slide choice (lesson 0008, task 0025).
+
+- **`chart_slide` gains the rail-less full-width variant:** `takeaway_below=True` (with no
+  `rail_spec`) drops the side panel and the divider — the visual spans the full content width and
+  the takeaway renders as one line under the content (or the title carries it when the takeaway is
+  omitted). The schema key is `takeaway_below`; the gallery has a `chart-xy-wide` entry. Every
+  slide that passes a `rail` (or a takeaway without one) draws exactly as in 1.4.0.
+
+Gallery diff: one new slide (`chart-xy-wide`, the full-width variant); every pre-existing slide is
+unchanged except its `n / N` page counter, which shifts because the new slide is inserted before
+them — `present components diff /tmp/gal-1.4.0r /tmp/gal-1.5.0r` (neutral tokens) reports every
+changed step's pixels confined to the counter region at the footer (e.g. "51 px in [19, 420, 38,
+427]"), with no change above the footer line. See `present components diff`.
+
 ## 1.4.0 — 2026-11-12
 
 The maintainer's round-5 review of the pilot deck (v2.3.0.)

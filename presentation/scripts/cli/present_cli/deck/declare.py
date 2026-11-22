@@ -100,6 +100,15 @@ CHART_KEYS = {
         "description": "[[kind, colour, text]] under the chart",
     },
     "rail_side": {"enum": ["right", "left"]},
+    "takeaway_below": {
+        "type": "boolean",
+        "description": (
+            "rail-less full-width chart (lesson 0008): no side panel or divider; the visual "
+            "spans the full content width and the takeaway renders as one line under the "
+            "content — omit `takeaway` and the title carries it instead. Cannot be combined "
+            "with `rail`."
+        ),
+    },
     "rail_sync": {
         "oneOf": [{"type": "boolean"}, {"type": "array", "items": {"type": "integer"}}]
     },
@@ -495,6 +504,7 @@ def render_slide(
         legend = w.pop("legend", None)
         side = w.pop("rail_side", "right")
         sync = w.pop("rail_sync", False)
+        below = w.pop("takeaway_below", False)
         args = w
 
         def draw(s, box, stage):
@@ -508,11 +518,12 @@ def render_slide(
                 srcs,
                 draw,
                 rail_spec=rail,
-                takeaway_text=takeaway or title,
+                takeaway_text=takeaway or (None if below else title),
                 stages=stages,
                 rail_side=side,
                 rail_sync=sync,
                 legend=[tuple(x) for x in legend] if legend else None,
+                takeaway_below=below,
             )
         )
     if comp.kind == "panel":

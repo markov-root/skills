@@ -565,7 +565,7 @@ def _validate_check_thresholds(data: dict[str, Any], file: Path,
     _unexpected_keys(raw, schema, "check_thresholds", file, lines)
     result: dict[str, float] = {}
     for key, value in raw.items():
-        floor = 0 if key in ("label_collision_max_area_px2", "stage_max_drift_px", "crop_margin_px") else 1
+        floor = 0 if key in ("label_collision_max_area_px2", "stage_max_drift_px", "crop_margin_px", "direct_label_max_distance_px") else 1
         if (not isinstance(value, (int, float)) or isinstance(value, bool)
                 or not math.isfinite(value) or value < 0 or (floor and value == 0)):
             _fail(f"check_thresholds.{key}", "a finite number above zero" if floor else

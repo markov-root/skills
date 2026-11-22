@@ -84,8 +84,8 @@ def _configure_check(p):
     configure=_configure_check,
     effects=Effects(
         description="Reads scripts, annotations and the claims ledger; never edits them. "
-        "Resolves research:/dataset: source references through the read-only `research` "
-        "and `datasets` CLIs when present."
+        "Resolves literature:/dataset: source references through the read-only `research` "
+        "CLI when present."
     ),
 )
 def claims_check(ns, res: Result) -> Result:
@@ -271,12 +271,12 @@ def _configure_pin(p):
 @leaf(
     "claims",
     "pin",
-    summary="write the exact resolved version into unpinned research:/dataset: sources",
+    summary="write the exact resolved version into unpinned literature:/dataset: sources",
     task="0022",
     configure=_configure_pin,
     effects=Effects(
         writes=True,
-        description="Dry run by default: resolves unpinned research:/dataset: references in the "
+        description="Dry run by default: resolves unpinned literature:/dataset: references in the "
         "ledger's Source cells and lists the edits. --apply rewrites only those references in "
         "research/claims.md; every other byte is kept.",
     ),

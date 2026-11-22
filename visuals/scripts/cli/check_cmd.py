@@ -2,7 +2,8 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow>=10"]
 # ///
-"""`visuals check` adapter. Findings are advisory and never change exit code."""
+"""`visuals check` adapter. Exit 1 only for the clipped-content blocker;
+advisory findings never change the exit code (ADR 0004)."""
 
 from __future__ import annotations
 
@@ -35,8 +36,12 @@ def main(argv: list[str]) -> int:
         print(json.dumps(result, indent=2))
     else:
         counts = result["summary"]
-        print(f"check {args.slug}: {counts['finding']} advisory findings, "
+        print(f"check {args.slug}: {counts['blocking']} blocking, "
+              f"{counts['finding']} advisory findings, "
               f"{counts['not-measurable']} not measurable")
+        for entry in result["blocking"]:
+            print(f"  BLOCKING: {entry['condition']} {entry['frame']} {entry['selector']} "
+                  f"({entry['content']!r}): overflow={entry['measured']}; {entry['to_satisfy']}")
         for entry in result["entries"]:
             if entry["outcome"] != "pass":
                 print(f"  {entry['outcome']}: {entry['gate']} "
@@ -45,7 +50,7 @@ def main(argv: list[str]) -> int:
                       f"{entry['to_satisfy']}")
         print("Not assessed: " + ", ".join(result["not_assessed"]) + ".")
         print("Ladder: " + json.dumps(result["ladder"]))
-    return 0
+    return 1 if result["blocking"] else 0
 
 
 if __name__ == "__main__":

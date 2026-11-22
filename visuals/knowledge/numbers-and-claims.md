@@ -87,6 +87,25 @@ and attribute it to yourself. Both are honest. Mixing them is not.
 > least-squares fit over the same points yields materially different figures, "and the slide would
 > then be quoting us, not them."
 
+### Worked example — several published sources on one fixed canvas
+
+A build had to place three tier lines and two published trend fits, each with its end label, on one
+fixed-size chart. The decisions, in order:
+
+1. **Who owns each line's figure?** For every line, apply rule 3 before drawing: a fit taken from a
+   publisher is drawn on the publisher's own parameters and labelled with the publisher's number; a
+   tier line you derived yourself is labelled as your own claim. Never label a publisher-owned line
+   with your refit of it.
+2. **Where the provenances differ, draw the seam** (rule 6): a change of measurement window,
+   definition, or revision between the lines is marked on the canvas, not smoothed into one visual.
+3. **The canvas carries only what the argument uses.** A line that supplies context but carries no
+   step of the argument loses its direct label and is named in the commentary instead. Every
+   remaining label sits in the reserved corridor (see [`annotation.md`](annotation.md) §2), so a
+   source added later cannot start a label collision.
+4. **Check at delivery size** ([`release-check.md`](release-check.md) §3). If two labels merge at
+   the size it will actually be read, the chart is carrying one more element than the canvas
+   supports — remove an element or move it to the commentary; shrinking the type is not a fix.
+
 ## 4. Mark incomplete data, and say what follows from it `[core]`
 
 **Rule.** Where a graphic shows data that is partial, provisional, or still arriving, two things are
@@ -107,6 +126,26 @@ a distinct cell treatment and a stated note.
 re-encoding, which is why a geometric cue — a hatch, a dash, a hollow mark — is usually the safer
 choice than a pale fill. Fine hatching can disappear too; the way to know is
 [`release-check.md`](release-check.md) §3, which looks at the frame at delivery size.
+
+### Worked example — matrix states that are not scores
+
+A disclosure matrix was mostly cells with no score at all: values the source never published,
+commitments that did not apply to a row, and rows whose evidence was incomplete. The decision
+procedure, applied once per state:
+
+1. **Name each state precisely.** "Not disclosed", "not applicable", and "insufficient evidence"
+   are different claims about different absences; one catch-all word asserts more than the data
+   supports. The name is the cell's content — a non-score state is a claim like any printed number
+   and traces to a record (rule 7).
+2. **Give each state a cell treatment** distinct from the score scale and from every other state,
+   not carried by colour alone — a pattern, an empty cell, a corner marker. In a matrix there is
+   no commentary column and no region to hatch; the cell treatment and the note are the whole of
+   what rule 4 requires there.
+3. **Every state appears in the legend, worded exactly as the cell words it.** A legend entry that
+   paraphrases the cell makes the reader match two vocabularies.
+4. **Where the state means "data exists but the basis is incomplete", mark and say** (rule 4): the
+   marker on the cell says that something is partial; a stated note says what follows — what the
+   reader must not conclude from it.
 
 ## 5. Adjacency is not causation, and the disclaimer is on the canvas `[core]`
 

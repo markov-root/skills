@@ -27,11 +27,11 @@ Capability domain, not a command handler: `validate_cmd.py` imports this
 module; it never imports a handler, the dispatcher, or another adapter
 (architecture doc, "Dependency direction"). Read-only: validates, never fixes.
 
-The clipped-content instrument is structural for now — a delivered frame's
-pixel dimensions against the canvas its own receipt declares — because the
-scene report that would measure rendered geometry does not exist until tasks
-0011/0012, which upgrade this check to measured geometry. No
-measurement-derived findings are invented here (task 0007 non-goal).
+The clipped-content instrument here is structural — a delivered frame's
+pixel dimensions against the canvas its own receipt declares — so `validate`
+stays browser-free over the store. `visuals check` evaluates the same ADR 0004
+blocker from measured geometry (task 0012). No measurement-derived findings
+are invented here (task 0007 non-goal).
 """
 
 from __future__ import annotations
@@ -496,8 +496,8 @@ def _receipt_findings(
                     f"receipt declares canvas {vw}x{vh} @{scale:g}x — content "
                     "outside the declared frame is absent from the delivered "
                     "artifact, or the receipt misdescribes it (ADR 0004 "
-                    "blocker 1; measured-geometry evaluation arrives with "
-                    "task 0012); to pass: re-render this version so the frame "
+                    "blocker 1; `visuals check` evaluates it from measured "
+                    "geometry); to pass: re-render this version so the frame "
                     "matches the declared canvas",
                 )
             )

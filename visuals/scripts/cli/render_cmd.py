@@ -85,6 +85,8 @@ def main(argv: list[str]) -> int:
         )
     except render.RenderError as exc:
         print(f"visuals render: error: {exc}", file=sys.stderr)
+        if isinstance(exc, render.RenderInputError):
+            return 2
         return 3 if isinstance(exc, render.RenderUnavailable) else 1
 
     receipt = outcome.receipt

@@ -110,6 +110,24 @@ scene-graph measurement exists, content overflowing *within* the canvas is found
 frame (see [`release-check.md`](release-check.md) §2), which is one more reason to make the layout
 incapable of it.
 
+### Worked example — how much quote a card carries
+
+A quote card is a fixed canvas with one variable: the length of the quotation. The decision is made
+by measurement, not taste — the text is bucketed at render into a small number of length classes by
+its own length, and each class sets the display size the card's layout has been verified to hold at
+delivery size. Length is one axis and composition is another: the same content contract may render
+in several variants (a rule beside the text, centred, an inverted field), and the length decision
+applies to every variant, so choosing a variant never changes what the text is allowed to do.
+
+> **Attributed example.** The reference corpus's quote card buckets its quotations into three
+> length classes at render and renders one content contract in four composition variants; the
+> display size per class and the padding per variant are that corpus's declared values, not
+> defaults of this skill.
+
+The rule beneath both axes is this section: the card must not overflow, and the type must stay
+readable at the medium's reading distance (see [`annotation.md`](annotation.md), "When a label will
+not fit").
+
 ## 7. Let labels overhang the plot, but not the canvas `[style]`
 
 **Rule.** The drawing area of a chart may be permitted to paint outside its own bounds so that a
@@ -131,6 +149,26 @@ would individually prefer a different shape.
 > **Attributed example.** The reference corpus has two such families, each sharing one drawing
 > geometry across its members, and records the reason in a brief: matching the sibling's geometry so
 > that nothing is letterboxed when the deck moves between them.
+
+### Worked example — one spine across mixed scenes
+
+A deck that mixes charts, matrices, and quote cards can still read as one deck. The corpus holds a
+**spine** of shared structure across all of them, and the spine is deliberately narrow: the reserved
+edges, the attribution band, the footer furniture, and the treatment of whatever sits at the frame's
+top are decided once in the project's visual system, and every visual adopts them before its own
+family conventions are chosen. Everything inside the spine varies by family.
+
+The boundary is the decision worth writing down: **the spine governs the frame, not the family.**
+Legend placement inside a chart is a chart-family question, and cell treatments in a matrix are a
+matrix-family question (ADR 0008); pulling a family convention up into the spine is how a
+line-chart habit becomes a mandate for a matrix. When a new visual seems not to fit the spine, ask
+whether the conflict is with the frame — fix it — or with its family's own logic, which the spine
+must leave alone.
+
+> **Attributed example.** The mixed-scene corpus visuals share one edge inset, one attribution
+> band, and one footer treatment while their interiors differ by family; the corpus records the
+> spine in its shared visual-system stylesheet, and its mining report treats any family convention
+> found there as a finding.
 
 ---
 

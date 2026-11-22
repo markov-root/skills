@@ -1,7 +1,12 @@
-"""Project-selected advisory evaluation of a measured authored visual.
+"""Measured evaluation of an authored visual: one blocker, selected advisories.
 
-No finding changes an exit status. Unknown paint and absent annotations stay
-explicitly unmeasured. The project supplies every numeric gate threshold.
+The ADR 0004 clipped-content blocker is evaluated here from measured geometry
+for every visual (blockers are skill-wide, not project-selected): text whose
+glyph band, or an annotated data mark, extends past the canvas is absent from
+the delivered frame. That is the only outcome that changes the exit status.
+Every other gate is advisory and project-selected; unknown paint and absent
+annotations stay explicitly unmeasured. The project supplies every numeric
+advisory threshold.
 """
 
 from __future__ import annotations
@@ -21,6 +26,14 @@ import config
 
 GATES = config.MEASUREMENT_ADVISORIES
 UNASSESSED = ("visual hierarchy", "communication", "aesthetic quality")
+#: Sub-pixel slack for the blocker: layout rounding, not a design threshold.
+CLIP_TOLERANCE_PX = 0.5
+#: Primary families that name a role, not a font; any rendered face satisfies them.
+GENERIC_FAMILIES = frozenset({
+    "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui",
+    "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded", "emoji", "math",
+    "fangsong", "-apple-system", "blinkmacsystemfont",
+})
 
 
 class CheckError(Exception):
@@ -40,8 +53,181 @@ def _decision(value: float | None, threshold: float | None, *, low_bad: bool) ->
     return "finding" if (value < threshold if low_bad else value > threshold) else "pass"
 
 
+def _overflow(rect: dict, canvas: dict) -> dict:
+    top, bottom = rect["y"], rect["y"] + rect["height"]
+    return {"left": max(0.0, -rect["x"]), "top": max(0.0, -top),
+            "right": max(0.0, rect["x"] + rect["width"] - canvas["width"]),
+            "bottom": max(0.0, bottom - canvas["height"])}
+
+
+def _visible(rect: dict, inset_y: float, clip: dict | None) -> dict | None:
+    """The glyph band of `rect` that an overflow-clipping ancestor lets paint."""
+    left, right = rect["x"], rect["x"] + rect["width"]
+    top, bottom = rect["y"] + inset_y, rect["y"] + rect["height"] - inset_y
+    if clip is not None:
+        left, right = max(left, clip["x"]), min(right, clip["x"] + clip["width"])
+        top, bottom = max(top, clip["y"]), min(bottom, clip["y"] + clip["height"])
+    if right <= left or bottom <= top:
+        return None
+    return {"x": left, "y": top, "width": right - left, "height": bottom - top}
+
+
+def _meets_canvas(rect: dict, canvas: dict) -> bool:
+    return (rect["x"] < canvas["width"] and rect["x"] + rect["width"] > 0
+            and rect["y"] < canvas["height"] and rect["y"] + rect["height"] > 0)
+
+
+def clipped_content(report: dict) -> list[dict]:
+    """ADR 0004 blocker 1 from measured geometry.
+
+    Content means visible text and annotated data marks. A text line box spans
+    the line height, whose half-leading may legitimately cross the edge while
+    the glyphs do not, so each line is inset vertically to its font-size band
+    before comparison. Text is first cut to its ancestors' overflow clip;
+    text that never meets the canvas (off-screen accessibility text) and text
+    bounded by `clip`/`clip-path` do not block. Decorative layers and images
+    are not content here: a full-bleed background is a design choice, and
+    geometry-overflow reports it.
+    """
+    blocking: list[dict] = []
+    for frame_name, frame in report["frames"].items():
+        canvas = frame.get("canvas") or report["canvas"]
+        for selector, texts in frame["texts"].items():
+            for text in texts:
+                if text.get("clip_unknown"):
+                    continue  # `clip`/`clip-path` bounds it in a way geometry cannot state
+                size = text["computed_size_px"]
+                lines = text.get("lines") or []
+                line_height = lines[0]["height"] if lines else text["box"]["height"]
+                # The per-line list is capped; the union box (inset by the same
+                # half-leading at its first and last line) always covers the rest.
+                rects = [*((line, max(0.0, (line["height"] - size) / 2)) for line in lines),
+                         (text["box"], max(0.0, (line_height - size) / 2))]
+                worst = {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+                for rect, inset in rects:
+                    rect = _visible(rect, inset, text.get("clip_box"))
+                    if rect is None or not _meets_canvas(rect, canvas):
+                        # Already clipped away by an ancestor, or never on the
+                        # canvas at all (off-screen accessibility text): not
+                        # content the delivered frame was meant to show.
+                        continue
+                    for side, value in _overflow(rect, canvas).items():
+                        worst[side] = max(worst[side], value)
+                if max(worst.values()) > CLIP_TOLERANCE_PX:
+                    blocking.append({
+                        "condition": "clipped-content", "severity": "blocking",
+                        "frame": frame_name, "selector": selector,
+                        "content": text["content"][:80],
+                        "measured": {k: round(v, 3) for k, v in worst.items()},
+                        "threshold": {"canvas": canvas, "tolerance_px": CLIP_TOLERANCE_PX},
+                        "to_satisfy": "Move or resize the text so every line lies inside the canvas.",
+                        "box": text["box"]})
+        annotation = frame["annotation"]
+        for mark in annotation.get("marks", []) if annotation.get("present") else []:
+            over = _overflow(mark["box"], canvas)
+            if _meets_canvas(mark["box"], canvas) and max(over.values()) > CLIP_TOLERANCE_PX:
+                blocking.append({
+                    "condition": "clipped-content", "severity": "blocking",
+                    "frame": frame_name, "selector": mark["selector"],
+                    "content": f"data mark {mark['series']}={mark['value']}",
+                    "measured": {k: round(v, 3) for k, v in over.items()},
+                    "threshold": {"canvas": canvas, "tolerance_px": CLIP_TOLERANCE_PX},
+                    "to_satisfy": "Fit the data mark inside the canvas (scale or domain).",
+                    "box": mark["box"]})
+    return blocking
+
+
+def _font_outcome(text: dict, faces: list[dict]) -> tuple[str, object]:
+    """Fallback verdict for the requested primary family, with what rendered."""
+    requested = text.get("requested_font_family", "")
+    primary = requested.split(",", 1)[0].strip().strip("\"'")
+    used = [f for f in text["resolved_fonts"] if f["glyph_count"] > 0]
+    names = [f["family"] for f in used]
+    measured = {"requested": primary or None, "rendered": names or None}
+    if not primary or not used:
+        return "not-measurable", measured
+    if primary.casefold() in GENERIC_FAMILIES:
+        return "pass", measured
+    if any(n.casefold() == primary.casefold() for n in names):
+        return "pass", measured
+    declared = [f for f in faces if f["family"].casefold() == primary.casefold()]
+    if declared:
+        statuses = {f["status"] for f in declared}
+        measured["font_face_status"] = sorted(statuses)
+        # CDP reports a webfont by its internal name, not the @font-face alias,
+        # so a loaded alias plus a custom glyph source is the rendered webfont.
+        if "loaded" in statuses and any(f["custom"] for f in used):
+            return "pass", measured
+        if statuses == {"error"}:
+            return "finding", measured
+        return "not-measurable", measured
+    # A system family: CDP reports the platform's own family name, which can be
+    # a longer variant of the requested one ("Inter" -> "Inter Variable"); a
+    # prefix match in either direction is the same family, anything else is a
+    # substitution (fontconfig or Chrome picked another face).
+    wanted = primary.casefold()
+    if any(n.casefold().startswith(wanted) or wanted.startswith(n.casefold()) for n in names):
+        return "pass", measured
+    return "finding", measured
+
+
+def _colour_only(frame_name: str, frame: dict, limit: float | None) -> list[dict]:
+    """WCAG 1.4.1-style check over annotated marks: is each series told apart
+    by something other than colour — a distinct non-colour channel signature
+    (element, dash, marker, pattern, symbol, declared shape) or a direct label
+    (text equal to the series name within the project's distance limit)?"""
+    annotation = frame["annotation"]
+    if not annotation.get("present"):
+        return [_item("colour-only-encoding", frame_name, "[data-series]", "not-measurable",
+                      None, limit,
+                      "Annotate marks with data-series and data-value to measure encoding.", None)]
+    series: dict[str, list[dict]] = {}
+    for mark in annotation["marks"]:
+        series.setdefault(mark["series"], []).append(mark)
+    if len(series) < 2:
+        return [_item("colour-only-encoding", frame_name, "[data-series]", "pass",
+                      {"series": list(series)}, limit,
+                      "Nothing to do: a single series needs no colour distinction.", None)]
+
+    def signature(marks: list[dict]) -> frozenset:
+        return frozenset(tuple(sorted((m.get("channels") or {}).items())) for m in marks)
+
+    def centre(b: dict) -> tuple[float, float]:
+        return b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+
+    texts = [t for items in frame["texts"].values() for t in items]
+    signatures = {name: signature(marks) for name, marks in series.items()}
+    entries = []
+    for name, marks in series.items():
+        # A series is told apart only if no mark kind it uses is also used,
+        # identically except for colour, by another series.
+        sharing = sorted(o for o in series if o != name and signatures[o] & signatures[name])
+        named = [t for t in texts if t["content"].strip().casefold() == name.casefold()]
+        nearest = None
+        if named:
+            nearest = min(math.dist(centre(t["box"]), centre(m["box"]))
+                          for t in named for m in marks)
+        measured = {"series": name, "shares_non_colour_channels_with": sharing,
+                    "nearest_name_label_px": None if nearest is None else round(nearest, 1)}
+        if not sharing:
+            outcome = "pass"
+        elif nearest is not None and limit is None:
+            outcome = "not-measurable"
+        elif nearest is not None and nearest <= limit:
+            outcome = "pass"
+        else:
+            outcome = "finding"
+        action = ("Declare check_thresholds.direct_label_max_distance_px to judge direct labels."
+                  if outcome == "not-measurable" else
+                  f"Give series {name!r} a non-colour cue (dash, marker, pattern, shape) "
+                  "or a direct label beside its marks; a colour-keyed legend does not count.")
+        entries.append(_item("colour-only-encoding", frame_name, marks[0]["selector"], outcome,
+                             measured, limit, action, marks[0]["box"]))
+    return entries
+
+
 def evaluate(report: dict, selected: tuple[str, ...], thresholds: dict[str, float]) -> dict:
-    """Evaluate only selected checks. No rule is derived from knowledge/."""
+    """Evaluate the blocker and only selected advisories. No rule is derived from knowledge/."""
     measure.validate_report(report)
     entries: list[dict] = []
     selected_set = set(selected) & set(GATES)
@@ -73,17 +259,9 @@ def evaluate(report: dict, selected: tuple[str, ...], thresholds: dict[str, floa
                                          threshold,
                                          "Declare a project contrast floor and adjust actual foreground or background to meet it; inspect unsupported paint manually.", box))
                 if "resolved-font-fallback" in selected_set:
-                    requested = text.get("requested_font_family", "")
-                    primary = requested.split(",", 1)[0].strip().strip("\"'")
-                    used = [f["family"] for f in text["resolved_fonts"] if f["glyph_count"] > 0]
-                    # CDP reports a font's internal family name, which may
-                    # differ from an @font-face alias or a system alias. A
-                    # mismatch alone is not proof of fallback.
-                    outcome = ("pass" if primary and any(
-                        f.casefold() == primary.casefold() for f in used)
-                        else "not-measurable")
+                    outcome, measured_font = _font_outcome(text, frame.get("font_faces", []))
                     entries.append(_item("resolved-font-fallback", frame_name, selector,
-                                         outcome, used or None, primary or None,
+                                         outcome, measured_font, measured_font["requested"],
                                          "Load the requested primary font or declare the actual fallback as the primary family.", box))
         if "label-collision" in selected_set:
             limit = thresholds.get("label_collision_max_area_px2")
@@ -105,9 +283,8 @@ def evaluate(report: dict, selected: tuple[str, ...], thresholds: dict[str, floa
                                          "Move the labels until their overlap area is within the project limit.",
                                          frame["elements"].get(selector, {}).get("box")))
         if "colour-only-encoding" in selected_set:
-            entries.append(_item("colour-only-encoding", frame_name, "[data-series]",
-                                 "not-measurable", None, None,
-                                 "Inspect the encoding manually; this scene report does not identify colour channels or redundant encodings.", None))
+            entries.extend(_colour_only(frame_name, frame,
+                                        thresholds.get("direct_label_max_distance_px")))
     if "stage-geometry" in selected_set:
         limit = thresholds.get("stage_max_drift_px")
         if limit is None:
@@ -122,13 +299,16 @@ def evaluate(report: dict, selected: tuple[str, ...], thresholds: dict[str, floa
                                      _decision(drift, limit, low_bad=False), drift, limit,
                                      "Keep the stage bounds within the project drift limit; check added or removed elements manually.",
                                      after or before))
+    blocking = clipped_content(report)
     return {"command": "check", "schema_version": 1, "slug": report["slug"],
+            "blocking": blocking,
             "selected_gates": [g for g in GATES if g in selected_set],
             "not_selected": [g for g in GATES if g not in selected_set],
             "unknown_selected": [g for g in selected if g not in GATES],
             "entries": entries,
-            "summary": {state: sum(e["outcome"] == state for e in entries)
-                        for state in ("finding", "pass", "not-measurable")},
+            "summary": {"blocking": len(blocking),
+                        **{state: sum(e["outcome"] == state for e in entries)
+                           for state in ("finding", "pass", "not-measurable")}},
             "not_assessed": list(UNASSESSED)}
 
 
@@ -200,7 +380,8 @@ def emit_ladder(report: dict, measured: dict, images: dict[str, bytes],
     contact = output / "01-contact-sheet-640.png"
     sheet.save(contact)
     crops = []
-    flagged = (e for e in measured["entries"] if e["outcome"] == "finding" and e["box"])
+    flagged = [*(b for b in measured.get("blocking", []) if b["box"]),
+               *(e for e in measured["entries"] if e["outcome"] == "finding" and e["box"])]
     for index, entry in enumerate(flagged if margin is not None else ()):
         frame = entry["frame"]
         box = entry["box"]

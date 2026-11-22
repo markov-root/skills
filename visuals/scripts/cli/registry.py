@@ -519,33 +519,39 @@ THEME_SPEC = CommandSpec(
 MEASURE_SPEC = CommandSpec(
     name="measure",
     usage="measure <slug> [--max-bytes N]",
-    summary="Report selector-keyed scene geometry, rendered fonts, bounded background paint, and stage differences.",
+    summary="Report selector-keyed scene geometry, rendered fonts, composited background and contrast, and stage differences.",
     help_text=(
         "Measure every manifest frame of <slug> after render readiness. Emits a\n"
         "versioned JSON report with selector-keyed element and text geometry,\n"
         "platform fonts actually used for glyphs, bounded CSS background\n"
         "composition, contrast, sibling overlap, annotations, and geometry\n"
-        "differences between stages. Unsupported paint returns null rather\n"
-        "than an invented colour. No findings, severities, scores, or gates.\n"
-        "The report is capped at 1 MB; overflow errors without partial JSON."
+        "differences between stages. Where CSS paint cannot be composed\n"
+        "(images, filters, blend modes, partial pseudo-elements), a twin\n"
+        "render with only glyph paint hidden is sampled behind each text\n"
+        "line, so every visible text node gets a background and a worst-case\n"
+        "contrast. The measured page is never modified. No findings,\n"
+        "severities, scores, or gates. The report is capped at 1 MB;\n"
+        "overflow errors without partial JSON."
     ),
-    backend="stdlib",
+    backend="uv",
     handler="measure_cmd",
 )
 
 CHECK_SPEC = CommandSpec(
     name="check",
     usage="check <slug> [--output DIR] [--json]",
-    summary="Evaluate project-selected advisory scene checks and emit a 640px contact sheet plus flagged crops.",
+    summary="Evaluate the measured clipped-content blocker and project-selected advisory scene checks; emit a contact sheet plus crops.",
     help_text=(
-        "Measure every manifest frame, evaluate only project-selected advisory\n"
-        "gates, and emit a delivery-size contact sheet followed by full-size\n"
-        "crops for flagged regions. Numeric thresholds and crop context come\n"
-        "from visuals.toml check_thresholds; unknown paint is explicitly\n"
-        "not-measurable. No finding affects the exit code. This command does\n"
-        "not assess hierarchy, communication, or aesthetic quality.\n"
-        "Exit codes: 0 completed regardless of findings, 1 execution error,\n"
-        "2 usage, 3 unavailable browser."
+        "Measure every manifest frame and evaluate the ADR 0004 clipped-content\n"
+        "blocker from geometry: visible text or an annotated data mark past the\n"
+        "canvas. Then evaluate only project-selected advisory gates and emit a\n"
+        "delivery-size contact sheet followed by full-size crops for blocking\n"
+        "and flagged regions. Numeric thresholds and crop context come from\n"
+        "visuals.toml check_thresholds; unknowns are explicitly not-measurable.\n"
+        "Advisory findings never affect the exit code. This command does not\n"
+        "assess hierarchy, communication, or aesthetic quality.\n"
+        "Exit codes: 0 no blocking condition (any advisory findings), 1 clipped\n"
+        "content or execution error, 2 usage, 3 unavailable browser."
     ),
     backend="uv",
     handler="check_cmd",
@@ -594,9 +600,10 @@ VALIDATE_SPEC = CommandSpec(
         "          checks are skipped and reported as not run)\n"
         "  --json  one versioned object, findings keyed by location\n"
         "\n"
-        "Read-only: validates, never fixes. The clipped-content instrument is\n"
-        "structural until tasks 0011/0012 upgrade it to measured geometry; no\n"
-        "measurement-derived findings are invented here.\n"
+        "Read-only: validates, never fixes. Here the clipped-content instrument\n"
+        "is structural (delivered frame size against the receipt's canvas) and\n"
+        "needs no browser; `check` evaluates the same blocker from measured\n"
+        "geometry. No measurement-derived findings are invented here.\n"
         "\n"
         "Exit codes: 0 ok (any number of advisory findings), 1 blocking\n"
         "condition, 2 usage, 3 unavailable (not an adopted project, or an\n"
@@ -632,6 +639,7 @@ COMMAND_BY_NAME: dict[str, CommandSpec] = {spec.name: spec for spec in COMMAND_S
 # under scripts/cli/ with a PEP 723 header; the lockfile sits beside each script.
 UV_ENTRYPOINTS: dict[str, str] = {
     "check": "check_cmd.py",
+    "measure": "measure_cmd.py",
     "render": "render_cmd.py",
     "bump": "bump_cmd.py",
     "image": "image_cmd.py",

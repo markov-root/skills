@@ -96,7 +96,8 @@
         "contrast_min_ratio": { "type": "number", "exclusiveMinimum": 0 },
         "label_collision_max_area_px2": { "type": "number", "minimum": 0 },
         "stage_max_drift_px": { "type": "number", "minimum": 0 },
-        "crop_margin_px": { "type": "number", "minimum": 0 }
+        "crop_margin_px": { "type": "number", "minimum": 0 },
+        "direct_label_max_distance_px": { "type": "number", "minimum": 0 }
       }
     },
     "improve": {

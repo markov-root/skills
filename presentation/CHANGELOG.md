@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.0 — 2026-11-22
+
+Tasks 0024 and 0025, and the Japan pilot closed (tasks 0013, 0014).
+
+### References (task 0024)
+
+- Canonical references (portfolio ADR 0006 as amended; research ADR 0008 decision 5): the CLI
+  parses and emits `literature:<ref>[@vN]` and `dataset:<id>[@<release>][.<table>][#<key>]`.
+  The aliases `research:`, `lit:` (literature) and `data:` plus the old `/table` separator
+  (dataset) are still read and are never emitted; `claims pin` writes canonical text; old receipts
+  and snapshots read unchanged. Datasets resolve through the unified `research` CLI
+  (`research dataset …`), falling back to a standalone `datasets` binary only when `research` is
+  absent — until now a missing `datasets` binary degraded every `dataset:` reference to
+  `capability_unavailable`. `present doctor` reports which backend serves the dataset surface.
+
+### The takeaway rail is a choice (task 0025; components 1.5.0)
+
+- The takeaway side rail is a per-slide choice, not a template (lesson 0008):
+  `knowledge/deck-standard.md` states the rail-is-a-choice rule with its boundary — the rail only
+  when it carries content the main area lacks; tables, lists and full-width diagrams take the full
+  width; a one-line takeaway goes in the title or a line under the content; step slides keep a
+  case panel that holds data. No knowledge file requires a side panel on every slide.
+- Chart slides gain the rail-less full-width variant: `takeaway_below: true` (with no `rail`) on
+  `chart_slide` / any chart component drops the panel and divider, spans the visual across the
+  full content width, and puts the takeaway in a line under the content (or in the title, when
+  `takeaway` is omitted). Schema key documented; gallery entry `chart-xy-wide`; slides that pass
+  a `rail` are pixel-identical in geometry (proven by shape-level test).
+
 ## 0.7.2 — 2026-11-21
 
 - New `knowledge/visuals.md`: how `presentation` and `visuals` work together, when a drawn visual is

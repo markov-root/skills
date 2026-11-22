@@ -64,9 +64,16 @@ and used identically in every deck. Similar items look the same everywhere.
 ## Density and type scale
 
 A slide carries the point **and** its context: the main visual, an annotation where it explains,
-and a side panel holding the takeaway as its lead sentence plus two to four small ordered facts
-that appear with the builds. Oversized type and one-element slides are a failure, not a cleaner
-version.
+and — when the slide has a side panel — the panel holding the takeaway as its lead sentence plus
+two to four small ordered facts that appear with the builds. Oversized type and one-element slides
+are a failure, not a cleaner version.
+
+**The side rail is a choice per slide, not a template** (lesson 0008). Use it only when it carries
+content the main area lacks: a hero figure with its context, or the ordered facts that appear with
+the builds. Tables, lists and full-width diagrams take the full width. A one-line takeaway needs no
+rail: it goes in the title or in a line under the content. Step slides keep a case panel when the
+panel holds data — the panel is a choice for what it carries, not a frame to fill. A rail reserved
+for a single sentence, leaving a tall empty column, is the failure this rule exists to prevent.
 
 | Element (native slide, 13.33 in wide) | Size |
 | --- | --- |
@@ -88,10 +95,11 @@ version.
   second iteration of the same layout.
 - **No lone huge numbers.** A number lives in a chart, a comparison or a panel with its context:
   what, when, and compared with what.
-- **Every chart states its takeaway** as the side panel's lead sentence. The plot gets the full
-  plot area.
-- **Slides are memory triggers.** The side panel lists the sentences the speaker will say, in
-  order, shortened from the script's own wording. It adds no new claims.
+- **Every chart states its takeaway.** On a slide with a side panel, it is the panel's lead
+  sentence; on a rail-less slide, it is in the title or in a line under the content. The plot gets
+  the full plot area either way.
+- **Slides are memory triggers.** Where a slide has a side panel, the panel lists the sentences
+  the speaker will say, in order, shortened from the script's own wording. It adds no new claims.
 
 ## Charts
 

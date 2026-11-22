@@ -139,21 +139,87 @@
     const index=Array.prototype.indexOf.call(el.childNodes,node);
     const x=Math.min(canvas.width-1,Math.max(0,r.x+r.width/2));
     const y=Math.min(canvas.height-1,Math.max(0,r.y+r.height/2));
+    // The painted glyph colour: SVG text paints `fill`; HTML text paints
+    // -webkit-text-fill-color (which defaults to `color`); background-clip:text
+    // paints the element's background through the glyphs, so no plain colour.
+    const svgText=el instanceof SVGElement;
+    const clipText=(s.webkitBackgroundClip||s.backgroundClip||"").includes("text");
+    const fgValue=svgText ? s.fill : (s.webkitTextFillColor || s.color);
+    const fg=clipText ? null : parseColor(fgValue);
     const bg=backgroundAt(el,x,y);
-    const fg=parseColor(s.color);
     const actualFg=fg && bg ? over(fg,bg.rgba) : null;
     const size=parseFloat(s.fontSize);
     if (!texts[parent]) texts[parent]=[];
+    const allLines=Array.from(range.getClientRects()).filter(q => q.width>0 && q.height>0);
+    const intersects=(q) => q.right>r.left && q.left<r.right && q.bottom>r.top && q.top<r.bottom;
+    // Effects on the text or an ancestor transform the painted glyph colour,
+    // so the computed colour is not what a reader sees; record them by name.
+    // Opacity is foldable only when nothing inside the faded group paints
+    // under the text: then the glyph is the text colour at that alpha over the
+    // pixel behind. Any painted layer in the group (ancestor, sibling, or
+    // pseudo-element) is composited into the group first, so the twin pixel no
+    // longer shows what the glyph blends with. Boxes, not elementsFromPoint,
+    // so pointer-events:none overlays are seen.
+    const paints=(st) => (parseColor(st.backgroundColor)||[0,0,0,1])[3]>0 || st.backgroundImage!=="none";
+    const paintsUnder=(g) => [g, ...Array.from(g.querySelectorAll("*")).slice(0,400)].some(n => {
+      if (!intersects(n.getBoundingClientRect())) return false;
+      const ns=getComputedStyle(n);
+      if (paints(ns) || (n instanceof SVGGeometryElement && ns.fill!=="none")) return true;
+      return ["::before","::after"].some(ps => {const pst=getComputedStyle(n,ps);
+        return pst.content!=="none" && pst.content!=="normal" && paints(pst);});
+    });
+    const effects=clipText ? ["background-clip:text"] : [];
+    let alpha=1;
+    // The visible clip: ancestors (and the text's own element) whose overflow
+    // clips their content bound what of the text can paint at all.
+    let clipBox=null, clipUnknown=false;
+    for (let a=el; a && a.nodeType===1; a=a.parentElement) {
+      const as=getComputedStyle(a);
+      if (as.filter!=="none") effects.push("filter");
+      if (as.mixBlendMode!=="normal") effects.push("mix-blend-mode");
+      if (Number(as.opacity)!==1) { if (paintsUnder(a)) effects.push("opacity"); else alpha*=Number(as.opacity); }
+      if ((as.clip && as.clip!=="auto") || (as.clipPath && as.clipPath!=="none")) clipUnknown=true;
+      if (a!==root && a!==document.body && (as.overflowX!=="visible" || as.overflowY!=="visible")) {
+        const q=a.getBoundingClientRect();
+        clipBox=clipBox ? {left:Math.max(clipBox.left,q.left),top:Math.max(clipBox.top,q.top),
+          right:Math.min(clipBox.right,q.right),bottom:Math.min(clipBox.bottom,q.bottom)}
+          : {left:q.left,top:q.top,right:q.right,bottom:q.bottom};
+      }
+    }
     texts[parent].push({parent_selector:parent,child_index:index,content:node.textContent,
-      computed_size_px:round(size),box:box(r),requested_font_family:s.fontFamily,
-      resolved_fonts:[],background:bg,foreground:s.color,
+      computed_size_px:round(size),box:box(r),lines:allLines.slice(0,32).map(box),line_count:allLines.length,
+      clip_box:clipBox ? box({x:clipBox.left,y:clipBox.top,width:Math.max(0,clipBox.right-clipBox.left),
+        height:Math.max(0,clipBox.bottom-clipBox.top)}) : null,clip_unknown:clipUnknown,
+      requested_font_family:s.fontFamily,
+      resolved_fonts:[],background:bg,foreground:fgValue,foreground_effects:[...new Set(effects)],foreground_opacity:round(alpha),
       contrast_ratio:actualFg && bg ? contrast(actualFg,bg.rgba) : null});
   }
   const annotations = Array.from(document.querySelectorAll("[data-series][data-value]"));
   const annotation = annotations.length ? {present:true,marks:[],labels:[],associations:[],collisions:[]} : {present:false};
   if (annotations.length) {
-    for (const el of annotations) annotation.marks.push({selector:selector(el),
-      series:el.dataset.series,value:el.dataset.value,box:box(el.getBoundingClientRect())});
+    for (const el of annotations) {
+      // Non-colour channels only: what would still distinguish this mark from
+      // another series in greyscale. Colour itself is deliberately excluded.
+      const ms=getComputedStyle(el);
+      // A url(#id) reference counts only by the GEOMETRY it draws: gradients
+      // are colour (null), and patterns, markers and symbols are compared by
+      // their child shapes, so two that differ only in colour still match.
+      const geometry=ref => {
+        const m=ref && ref.match(/url\(["']?#([^"')]+)["']?\)|^#(.+)$/);
+        const target=m && document.getElementById(m[1]||m[2]);
+        if (!target || /gradient/i.test(target.localName)) return null;
+        return target.localName+":"+Array.from(target.querySelectorAll("*")).slice(0,40).map(c =>
+          c.localName+"("+["d","points","r","rx","ry","width","height","x1","y1","x2","y2"].map(k =>
+          c.getAttribute(k)||"").join(",")+")").join(";");
+      };
+      const use=el.localName==="use" ? (el.getAttribute("href") || el.getAttribute("xlink:href")) : null;
+      annotation.marks.push({selector:selector(el),series:el.dataset.series,value:el.dataset.value,
+        box:box(el.getBoundingClientRect()),
+        channels:{element:el.localName,dash:ms.strokeDasharray||"none",
+          marker:[ms.markerStart,ms.markerMid,ms.markerEnd].filter(v => v && v!=="none").map(geometry).join(" ")||null,
+          pattern:geometry(ms.fill) || geometry(ms.backgroundImage),symbol:use ? geometry(use) : null,
+          shape:el.dataset.shape || null}});
+    }
     const textEntries=Object.entries(texts).flatMap(([key,items]) => items.map(item => ({selector:key,...item})));
     const distance=(a,b) => {
       const ax=a.x+a.width/2, ay=a.y+a.height/2, bx=b.x+b.width/2, by=b.y+b.height/2;
@@ -178,5 +244,15 @@
       if (w*h>0) annotation.collisions.push({a:a.selector,b:b.selector,area:round(w*h)});
     }
   }
-  return {canvas,elements,texts,annotation,counts:{elements:Object.keys(elements).length,texts:textCount}};
+  // Declared @font-face rules and their load status: lets a reader tell an
+  // alias that loaded from one that failed, which CDP's internal family name
+  // cannot. Reading FontFaceSet does not trigger loads.
+  const fontFaces=[];
+  for (const face of document.fonts) {
+    if (fontFaces.length>=64) break;
+    fontFaces.push({family:face.family.replace(/^["']|["']$/g,""),status:face.status,
+      weight:face.weight,style:face.style});
+  }
+  return {canvas,elements,texts,annotation,font_faces:fontFaces,
+    counts:{elements:Object.keys(elements).length,texts:textCount}};
 })()

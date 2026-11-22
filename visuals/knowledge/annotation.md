@@ -121,6 +121,49 @@ exists nowhere else.
 Where the deliverable is a flat image, there is nothing to mark up; the whole graphic carries one
 accessible description, and the same judgment applies to what that description includes.
 
+## 9. Styling a `<use>`-cloned mark: style the source, or inherit `[core]`
+
+**Rule.** CSS that must reach the inside of a `<use>`-cloned symbol either flows through
+inheritance from the `<use>` element, or its selectors match the referenced subtree itself. A
+selector scoped to the `<use>` element's document context does not reach the clone's internals.
+
+When a `<use>` element references a `<symbol>` (or any reusable subtree), the browser renders a
+clone of that subtree in a **shadow tree** attached to the `<use>` element. The cloned nodes are
+not exposed to the document, so a selector whose path runs through the document — `.slide use
+.icon-path`, or any rule that depends on ancestors or siblings the clone does not have — finds
+nothing to match. Per SVG2, document stylesheets do apply inside the shadow tree, and a clone
+usually matches the same rules as its source element; but a complex selector that depends on
+ancestors or siblings outside the referenced subtree stops matching (`src-svg2`). In practice:
+style never reaches the clone through the `<use>` element's own context, only through inheritance
+(`src-mdn`).
+
+Three things work, in the order to prefer them:
+
+1. **Inherited properties and `currentColor`.** Properties that inherit — fill via `currentColor`,
+   font properties, and the rest — flow from the `<use>` element into every clone. Setting them on
+   the `<use>` (or on a wrapper) is the cheapest way to theme one icon per instance, and it needs
+   no cooperation from the symbol's markup beyond using `currentColor` where a colour must follow.
+2. **CSS custom properties.** These inherit too, so the symbol's internal rules can read a
+   variable the `<use>` element sets, giving per-instance control of non-inherited detail.
+3. **Selectors targeting the symbol's descendants.** A rule whose selector matches elements inside
+   the referenced subtree (a class or id carried by the symbol's own markup) matches every clone,
+   because the same document stylesheets apply inside the shadow tree. Styles that every instance
+   should share belong here; styles that must vary per instance belong in the two mechanisms above.
+
+**Why it belongs in a knowledge file.** An icon drawn once and reused via `<use>` is the cheapest
+way to keep repeated decorative marks consistent, and the failure is silent: the icon renders in
+its authored style, the rule that was supposed to restyle it matches nothing, and the graphic ships
+with marks that ignore the project's theme. When a `<use>`-based mark refuses to take the
+stylesheet's styling, suspect this scoping before suspecting the stylesheet.
+
+> **Attributed example.** A parity build styled its shared line-icon set through document rules
+> scoped above the `<use>` element, saw every rule miss the clone's internals, and moved the
+> styling onto the symbol's own descendant selectors with per-instance values passed by inherited
+> custom properties.
+
+Sources: [`src-svg2`](../references/SOURCES.md) (SVG2, §5.5.3 Style Scoping and Inheritance),
+[`src-mdn`](../references/SOURCES.md) (MDN, `<use>` element reference).
+
 ---
 
 ## When a label will not fit

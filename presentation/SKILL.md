@@ -14,7 +14,7 @@ compatibility: >-
   Requires Python 3.11+ and uv (the launcher resolves PyYAML and jsonschema on first run; a
   cold offline run cannot). LibreOffice is needed only once deck building ships.
 metadata:
-  version: "0.7.2"
+  version: "0.8.0"
 ---
 
 # presentation

@@ -54,7 +54,7 @@ from . import kit as dk
 
 # The component library version (task 0015): receipts record it; any visible change bumps it and
 # carries a gallery diff in COMPONENTS-CHANGELOG.md (task 0016).
-COMPONENTS_VERSION = "1.4.0"
+COMPONENTS_VERSION = "1.5.0"
 
 
 # ---------------------------------------------------------------- palette (from tokens)
@@ -907,14 +907,22 @@ def chart_slide(
     notes=None,
     rail_from=1,
     legend=None,
+    takeaway_below=False,
 ):
-    """One chart (or native visual) per slide with ALL its text in the side panel (library v2,
-    9 Nov 2026): no takeaway line above the plot; the panel (right or left) leads with the
-    takeaway sentence, then the rail. The visual gets the full plot area.
+    """One chart (or native visual) per slide. The rail is a per-slide choice (lesson 0008):
+    the side panel exists only when the slide has one; by default the panel (right or left)
+    leads with the takeaway sentence, then the rail, and the visual gets the full plot area
+    (library v2, 9 Nov 2026).
 
     Slides are the presenter's memory triggers: takeaway_text (required) is the key point as a
     short sentence (the panel's lead, from stage 1); rail facts are phrased as the sentences he
     will say, in order. Without rail_spec the panel holds the takeaway alone.
+
+    takeaway_below=True: the rail-less full-width variant (library v1.5, lesson 0008) — no panel,
+    no divider; the visual spans the full content width and the takeaway renders as one line
+    under the content. Requires rail_spec to be absent (the rail and the full-width chart are
+    mutually exclusive). takeaway_text stays required — unless it is None, in which case the
+    title carries the takeaway and nothing is drawn under the content.
 
     legend: [(kind, color, text)] drawn by `legend_line` at the same place on every chart (the
     BOTTOM of the visual, boxless); the box passed to draw ends above it.
@@ -927,12 +935,29 @@ def chart_slide(
     rail (its space is reserved from stage 1, so the chart never moves). takeaway_text: str or (lead, rest).
     Returns the build slides."""
 
-    if not takeaway_text:
+    if takeaway_below and rail_spec:
         raise ValueError(
-            f"chart_slide {title!r}: a takeaway line is required (the presenter's memory trigger)"
+            f"chart_slide {title!r}: takeaway_below is the rail-less full-width variant — "
+            "it cannot be combined with rail_spec"
+        )
+    if not takeaway_text and not (takeaway_below and rail_spec is None):
+        raise ValueError(
+            f"chart_slide {title!r}: a takeaway line is required (the presenter's memory trigger; "
+            "on a takeaway_below slide the title may carry it instead)"
         )
 
     def one(s, k):
+        if takeaway_below:  # no rail: the visual spans the full content width
+            x, y, w, h = X0, Y0, X1 - X0, Y1 - Y0 - int(0.36 * IN)
+            if legend:  # legends at the bottom of the visual, every chart (library v2)
+                nr = legend_rows(legend, 10, w)
+                lh = int(0.3 * IN) + (nr - 1) * int(10 * LEGEND_ROW * PT)
+                legend_line(s, x, y + h - lh + int(0.04 * IN), legend, max_w=w)
+                h -= lh + int(0.08 * IN)
+            draw(s, (x, y, w, h), k)
+            if takeaway_text:  # None = the title carries the takeaway
+                takeaway(s, takeaway_text, y=Y1 - int(0.34 * IN))
+            return
         main, rx, div = rail_area(
             rail_side
         )  # the side panel always exists (takeaway lives there)

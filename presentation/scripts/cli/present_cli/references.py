@@ -1,10 +1,17 @@
-"""Typed `research:` and `dataset:` references (task 0022; portfolio ADR 0006 decision 2).
+"""Typed `literature:` and `dataset:` references (task 0022; portfolio ADR 0006 decision 2,
+as amended 2026-11-21 by research-datasets ADR 0008 decision 5; task 0024).
 
 A ledger `Source` cell, or a deck data value, may cite
 
-- `research:<ref>[@<version>]`: a corpus record, resolved by the research-database `research` CLI;
-- `dataset:<id>[@<release>][/<table>[#<row-ref>]]`: a dataset release, table or row, resolved by
-  the Datasets `datasets` CLI.
+- `literature:<ref>[@vN]`: a corpus record, resolved by the `research` CLI (`research cite`);
+- `dataset:<id>[@<release>][.<table>][#<key>]`: a dataset release, table or row, resolved by
+  the unified `research` CLI (`research dataset …`) or, as a fallback, the standalone `datasets`
+  binary.
+
+These are the canonical forms and the only ones this CLI emits. The older aliases stay readable
+as input and are never rewritten in place except by `claims pin`, which writes canonical text:
+`research:<ref>[@<version>]` and `lit:` for literature, `data:` and the old `/table` separator
+for datasets.
 
 Both CLIs are neighbours: they are found by an environment override, then PATH, then the skill
 directories, and never by an assumed install path. Each is run read-only with `--json`; a missing
@@ -26,11 +33,11 @@ from typing import Any
 # One reference ends at whitespace, a table pipe, a list separator, a closing bracket or a
 # backtick; a trailing full stop belongs to the sentence, not to the reference.
 _STOP = r"[^\s|,;)\]`<>\"']"
-RESEARCH = re.compile(rf"(?<![\w:])research:(?P<body>{_STOP}+)")
+RESEARCH = re.compile(rf"(?<![\w:])(?:literature|research|lit):(?P<body>{_STOP}+)")
 DATASET = re.compile(
-    r"(?<![\w:])dataset:(?P<id>[A-Za-z0-9][A-Za-z0-9_-]*)"
+    r"(?<![\w:])(?:dataset|data):(?P<id>[A-Za-z0-9][A-Za-z0-9_-]*)"
     r"(?:@(?P<release>[A-Za-z0-9_-]+))?"
-    rf"(?:/(?P<table>[A-Za-z0-9_]+)(?:#(?P<row>{_STOP}+))?)?"
+    rf"(?:[./](?P<table>[A-Za-z0-9_]+))?(?:#(?P<row>{_STOP}+))?"
 )
 LATEST = "latest"
 
@@ -53,13 +60,14 @@ class Ref:
         return self.version not in (None, LATEST)
 
     def text(self, version: str | None = None) -> str:
-        """The reference written out, optionally with another version."""
+        """The reference in its canonical form, optionally with another version."""
         v = self.version if version is None else version
         if self.kind == "research":
-            return f"research:{self.target}" + (f"@{v}" if v else "")
-        out = f"dataset:{self.target}" + (f"@{v}" if v else "")
+            out = f"literature:{self.target}"
+            return out + (f"@v{v}" if v and v != LATEST else "")
+        out = f"dataset:{self.target}" + (f"@{v}" if v and v != LATEST else "")
         if self.table:
-            out += f"/{self.table}"
+            out += f".{self.table}"
             if self.row:
                 out += f"#{self.row}"
         return out
@@ -69,13 +77,16 @@ def _research(m: re.Match) -> Ref:
     body = m.group("body").rstrip(".")
     target, version = body, None
     at = body.rfind("@")
-    if at > 0 and re.fullmatch(r"\d+|latest", body[at + 1 :]):
-        target, version = body[:at], body[at + 1 :]
+    if at > 0 and re.fullmatch(r"v\d+|\d+|latest", body[at + 1 :]):
+        v = body[at + 1 :]
+        # the version is stored as its number; the canonical form writes it back as `vN`
+        target, version = body[:at], (v[1:] if v.startswith("v") else v)
+    raw = m.group(0).rstrip(".")
     return Ref(
         "research",
-        f"research:{body}",
+        raw,
         m.start(),
-        m.start() + 9 + len(body),
+        m.start() + len(raw),
         target,
         version,
     )
@@ -116,10 +127,27 @@ CLIS = {
     "datasets": (
         "PRESENT_DATASETS_CLI",
         None,
-        "put the Datasets `datasets` CLI on PATH (its repository's installer), "
-        "or set PRESENT_DATASETS_CLI",
+        "resolve datasets through the `research` CLI (the research skill's installer), "
+        "or put the standalone `datasets` binary on PATH, or set PRESENT_DATASETS_CLI",
     ),
 }
+
+
+def find_datasets_cli() -> tuple[Path | None, tuple[str, ...]]:
+    """(binary, argument prefix) for the dataset surface: the unified `research` CLI first
+    (`research dataset …`), then the standalone `datasets` binary as a fallback. An explicit
+    `PRESENT_DATASETS_CLI` override wins and always speaks the standalone grammar; an empty
+    value switches the surface off."""
+    override = os.environ.get("PRESENT_DATASETS_CLI")
+    if override is not None:
+        p = Path(override) if override else None
+        ok = p is not None and p.is_file() and os.access(p, os.X_OK)
+        return (p if ok else None), ()
+    research = find_cli("research")
+    if research is not None:
+        return research, ("dataset",)
+    hit = shutil.which("datasets")
+    return (Path(hit) if hit else None), ()
 
 
 def find_cli(name: str) -> Path | None:
@@ -180,12 +208,18 @@ class Resolver:
     unavailable: dict[str, str] = field(default_factory=dict)  # cli -> why
     _paths: dict[str, Path | None] = field(default_factory=dict)
     _cache: dict[tuple, Resolution] = field(default_factory=dict)
+    _datasets_prefix: tuple[str, ...] = ()  # ("dataset",) under the `research` router
 
     def cli(self, name: str) -> Path | None:
         if name not in self._paths:
-            self._paths[name] = find_cli(name)
-            if self._paths[name] is None:
-                self.unavailable.setdefault(name, f"`{name}` CLI not found")
+            if name == "datasets":
+                self._paths[name], self._datasets_prefix = find_datasets_cli()
+                if self._paths[name] is None:
+                    self.unavailable.setdefault(name, "`datasets` CLI not found")
+            else:
+                self._paths[name] = find_cli(name)
+                if self._paths[name] is None:
+                    self.unavailable.setdefault(name, f"`{name}` CLI not found")
         return self._paths[name]
 
     def call(self, name: str, *args: str) -> tuple[int, dict[str, Any] | None]:
@@ -193,6 +227,8 @@ class Resolver:
         path = self.cli(name)
         if path is None:
             return -1, None
+        if name == "datasets" and self._datasets_prefix:
+            args = (*self._datasets_prefix, *args)
         try:
             proc = subprocess.run(
                 [str(path), *args, "--json"],
@@ -285,6 +321,10 @@ class Resolver:
         status, got = self.releases(ref.target)
         if status != "ok":
             return Resolution(status, message=str(got))
+        if ref.row and not ref.table:
+            return Resolution(
+                "unresolved", message=f"{ref.raw}: a row key needs a table"
+            )
         rels: list[dict[str, Any]] = got  # type: ignore[assignment]
         current = next((r["release"] for r in rels if r.get("current")), None)
         if current is None:

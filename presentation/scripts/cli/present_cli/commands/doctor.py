@@ -166,22 +166,47 @@ def doctor(ns, res: Result) -> Result:
                 f"{name}: {rel} not found; {used_for} is unavailable.",
                 next=hint,
             )
-    from ..references import find_cli, install_hint  # evidence CLIs (task 0022)
+    from ..references import (  # evidence CLIs (task 0022; canonical grammar task 0024)
+        find_cli,
+        find_datasets_cli,
+        install_hint,
+    )
 
-    for name, used_for in (
-        ("research", "resolving research: references in `claims check|pin`"),
-        ("datasets", "resolving dataset: references; snapshotting deck data"),
-    ):
-        path = find_cli(name)
-        capabilities.append(
-            _check(name, path is not None, str(path) if path else "not found", used_for=used_for)
+    research_path = find_cli("research")
+    capabilities.append(
+        _check(
+            "research",
+            research_path is not None,
+            str(research_path) if research_path else "not found",
+            used_for="resolving literature: references in `claims check|pin`",
         )
-        if path is None:
-            res.warn(
-                "capability_unavailable",
-                f"{name} CLI not found; {used_for} is unavailable.",
-                next=install_hint(name),
-            )
+    )
+    if research_path is None:
+        res.warn(
+            "capability_unavailable",
+            "research CLI not found; resolving literature: references is unavailable.",
+            next=install_hint("research"),
+        )
+    datasets_path, datasets_prefix = find_datasets_cli()
+    via = (
+        "the `research` CLI (`research dataset …`)" if datasets_prefix
+        else "the standalone `datasets` binary"
+    )
+    capabilities.append(
+        _check(
+            "datasets",
+            datasets_path is not None,
+            (f"{datasets_path} via {via}" if datasets_path else "not found"),
+            used_for="resolving dataset: references; snapshotting deck data",
+        )
+    )
+    if datasets_path is None:
+        res.warn(
+            "capability_unavailable",
+            "datasets CLI not found; resolving dataset: references and snapshotting deck data "
+            "are unavailable.",
+            next=install_hint("datasets"),
+        )
 
     repo = find_repo()
     repo_info: dict = {"found": repo is not None, "marker": MARKER}

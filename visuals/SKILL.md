@@ -2,27 +2,26 @@
 name: visuals
 description: >-
   Produce slides, posters, figures, diagrams, and charts under a production
-  contract. `render` captures a frame manifest in headless Chrome after a
-  readiness signal into immutable versions with SHA-256 receipts; `bump`
-  derives the next version. Unpublished renders can be probed by version and
-  promoted with `publish`. `measure` reports selector-keyed geometry, glyph
-  fonts, CSS paint composition, and unknowns. `check` evaluates selected
-  advisory measurements and emits a contact sheet plus flagged crops. `probe`
-  offers opt-in cold-reader checks at delivery size; `improve` drives bounded
-  author-led revision against explicit brief criteria. `validate` separates four
-  blocking conditions from advisory findings. `new` scaffolds a bare canvas;
-  `index` derives portfolio status; `sources` and `data snapshot` hash-lock
+  contract. `render` captures a frame manifest in headless Chrome into immutable
+  versions with SHA-256 receipts; `bump` and `publish` manage versions. `measure`
+  reports selector-keyed geometry, glyph fonts, and the background and contrast
+  behind every text line (from pixels where CSS cannot say). `check` blocks on
+  content clipped by the canvas and evaluates selected advisories (contrast, type
+  size, colour-only encoding, font fallback) with a contact sheet and crops.
+  `probe` runs cold-reader checks; `improve` drives bounded revision toward a
+  brief. `validate` separates four blocking conditions from advisories. `new`
+  scaffolds a bare canvas; `index`, `sources` and `data snapshot` track status and
   provenance; `image` delegates generation; `init` adopts a project. No command
-  ranks designs. For raster generation use image-generation; for chart design
-  use dataviz; for UI review use ux-engineering.
+  ranks designs. For raster generation use image-generation; for chart design use
+  dataviz; for UI review use ux-engineering.
 license: Apache-2.0
 compatibility: >-
   Requires Python 3.11+ (stdlib only for the dispatcher); `uv` for the
-  render-weight commands (`render`, `bump`, `improve`, `image`); Chrome or Chromium for
+  render-weight commands (`render`, `bump`, `measure`, `check`, `improve`, `image`); Chrome or Chromium for
   the authored-render engine. The `image-generation` skill is an optional
   delegate, capability-detected and never a hard dependency.
 metadata:
-  version: "0.9.2"
+  version: "0.10.0"
 ---
 
 # visuals
@@ -57,7 +56,7 @@ scripts/visuals improve <slug>        # dry-run: cap, next iteration, call estim
 scripts/visuals improve <slug> --execute  # render and probe one iteration
 scripts/visuals bump <slug> minor    # re-render at a derived next version
 scripts/visuals validate             # four blocking conditions, advisory findings separately
-scripts/visuals check <slug>         # project-selected advisory scene checks and looking ladder
+scripts/visuals check <slug>         # measured clipped-content blocker + selected advisories + looking ladder
 scripts/visuals probe <slug>         # dry-run; --execute dispatches fresh agents and spends quota
 scripts/visuals index                # derived portfolio status; never hand-maintained
 scripts/visuals sources verify       # re-hash every declared asset; https provenance
@@ -102,6 +101,9 @@ malformed output name) from advisory findings, which report and never affect the
 exit code; the project chooses which optional advisory checks run, and the report names
 the checks that did **not** run so a quiet report is distinguishable from a
 narrow one. Adding a fifth blocking condition requires a decision record.
+`validate` checks clipped content structurally (frame size against the receipt);
+`check` evaluates it from measured geometry and exits 1 when visible text or an
+annotated data mark (`data-series`) runs past the canvas.
 
 `index` derives portfolio status from the store on disk: per-visual version,
 disk-counted frames, content-based staleness (**mtime is never consulted**), and
